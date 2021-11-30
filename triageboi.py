@@ -12,11 +12,10 @@ def main():
 
 class data():
     def __init__(self, handle):
-        print("Class Initialized") # TEST
         self.handle = handle
         self.fsize = os.path.getsize(sys.argv[1])
         self.ftype = self.getFileType()
-        #self.fhash = self.hashfile()
+        self.fhash = self.hashfile()
     
     def getFileType(self):
         ftypes = {
@@ -30,26 +29,32 @@ class data():
         
 
     def hashfile(self):
-        buff_size = 65536# lets read stuff in 64kb chunks!
-
         md5 = hashlib.md5()
+        with open(sys.argv[1], 'rb') as afile:
+            buf = afile.read()
+            md5.update(buf)
+
         sha1 = hashlib.sha1()
+        with open(sys.argv[1], 'rb') as afile:
+            buf = afile.read()
+            sha1.update(buf)
 
-        while True:
-            data = self.read(buf_size)
-            if not data:
-                break
-            md5.update(data)
-            sha1.update(data)
+        sha256 = hashlib.sha256()
+        with open(sys.argv[1], 'rb') as afile:
+            buf = afile.read()
+            sha256.update(buf)
+            
+        md5 = md5.hexdigest().upper()
+        sha1 = sha1.hexdigest().upper()
+        sha256 = sha256.hexdigest().upper()
+        print("MD5: " + md5)
+        print("SHA1: " + sha1)
+        print("SHA256: " + sha256)
 
-        print("MD5: {0}".format(md5.hexdigest()))
-        print("SHA1: {0}".format(sha1.hexdigest()))
 
     def printVals(self):
         print("File Name: " + sys.argv[1])
         print("size calculated: " + str(self.fsize) + " Bytes")
         print("File Type: " + str(self.ftype))
-        print("MD5: {0}".format(md5.hexdigest()))
-        print("SHA1: {0}".format(sha1.hexdigest()))
 
 main()
