@@ -2,13 +2,16 @@ import sys
 import hashlib
 import os
 import pefile
+import json
+import requests
 
 
 def main():
     try:
         fileh = open(sys.argv[1], "rb")
         fclass = data(fileh)
-        fclass.printVals()
+        #fclass.printVals()
+        fclass.vtSearch()
         fclass.createLogFile()
 
     except IndexError:
@@ -81,6 +84,10 @@ class data():
             self.ftype = "32bit PE File"
         else:
             self.ftype = "64bit PE File"
+
+        # Looking if it's a DLL or EXE
+        if pe.dump_dict()['FILE_HEADER']['Characteristics']['Value'] & 0x2000:
+            self.ftype += ' (DLL)'
 
         # Compiled Time
         self.compile_time = (pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
@@ -194,9 +201,41 @@ class data():
             if machtype == key:
                 self.machtype = value
 
+    def vtSearch(self):
+        # Send file to VT
+
+        # \/\/INSERT VT API KEY IF YOU WANT THIS TO WORK\/\/
+        apikey = '<INSERT_VT_API_KEY>'
+        # /\/\INSERT VT API KEY IF YOU WANT THIS TO WORK/\/\
+
+        if apikey == '<INSERT_VT_API_KEY>':
+            self.VTsuccess = False
+        else:
+            api_url = 'https://www.virustotal.com/vtapi/v2/file/scan'
+            params = dict(apikey=apikey)
+            with open(sys.argv[1], 'rb') as file:
+                files = dict(file=(sys.argv[1], file))
+                response = requests.post(api_url, files=files, params=params)
+            if response.status_code == 200:
+                self.VTsuccess = True
+                result=response.json()
+                print(json.dumps(result, sort_keys=False, indent=4))
+
+            # Retrieve Report from VT
+            api_url = 'https://www.virustotal.com/vtapi/v2/file/report'
+            params = dict(apikey=apikey, resource='275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f-1577043276')
+            response = requests.get(api_url, params=params)
+            if response.status_code == 200:
+                self.result = response.json()
+                self.VTOutput = json.dumps(self.result, sort_keys=False, indent=4)
+
+                # Write VT JSON Log
+                hVTLog = open(sys.argv[1] + "_VT_REPORT.json", "a")
+                hVTLog.write(self.VTOutput)
+                hVTLog.close()
+
     def printVals(self):
         # Print output to console
-
         print("\nStandard Data:")
         print("File Name: " + sys.argv[1])
         print("File Size: " + str(self.fsize) + " Bytes")
@@ -217,7 +256,7 @@ class data():
             print("Machine Type: " + self.machtype)
 
     def createLogFile(self):
-        # Print output to log file
+        # Write output to log file
         hLogFile = open(sys.argv[1] + "_TRIAGE_LOG.txt", "a")
         welcome = "TRIAGEBOI Log Output For File: " + sys.argv[1] + "\n\n" + \
                   "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)\n\n"
@@ -240,6 +279,14 @@ class data():
             hLogFile.write("ABI: " + self.abi + "\n")
             hLogFile.write("Object File Type: " + self.objtype + "\n")
             hLogFile.write("Machine Type: " + self.machtype + "\n")
+
+        # Write VT results to Log file
+        hLogFile.write("\nVirusTotal Data:")
+        if self.VTsuccess == True:
+            hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']))
+            hLogFile.write("\nLink to Report: " + str(self.result['permalink']))
+        else:
+            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results")
 
         hLogFile.close()
 
