@@ -3,12 +3,16 @@ import hashlib
 import os
 import pefile
 
+
 def main():
     try:
-        fclass = data(open(sys.argv[1],"rb"))
+        fileh = open(sys.argv[1], "rb")
+        fclass = data(fileh)
         fclass.printVals()
+
     except IndexError:
         print("Please provide input file as argument")
+
 
 class data():
     def __init__(self, handle):
@@ -26,9 +30,9 @@ class data():
             self.elffile_info(self.handle)
         else:
             self.binbool = False
-    
+
     def getFileType(self):
-        #Grab file type based on magic number.
+        # Grab file type based on magic number.
         
         ftypes = {
             b"MZ\x90" : "PE File",
@@ -39,15 +43,18 @@ class data():
             b"\x75\x73\x74" : "Tar Folder",
             b"\xd0\xcf\x11" : "Microsoft Installer"
         }
+        
         magic = self.handle.read(3)
         self.handle.seek(0)
         for key,value in ftypes.items():
             if magic == key:
                 return value
+            else:
+                return "Unknown File Type"
 
     def hashfile(self):
-        #Produce MD5, SHA1, and SHA256 hashes. returns as class var.
-        
+        # Produce MD5, SHA1, and SHA256 hashes. returns as class var.
+
         md5 = hashlib.md5()
         with open(sys.argv[1], 'rb') as afile:
             buf = afile.read()
@@ -62,23 +69,24 @@ class data():
         with open(sys.argv[1], 'rb') as afile:
             buf = afile.read()
             sha256.update(buf)
-            
+
         md5 = md5.hexdigest().upper()
         sha1 = sha1.hexdigest().upper()
         sha256 = sha256.hexdigest().upper()
         hashes = (md5, sha1, sha256)
-        
+
         return hashes
 
     def pefile_info(self, pe):
         #Check if it is a 32-bit or 64-bit binary
         if hex(pe.FILE_HEADER.Machine) == '0x14c':
-            self.ftype = "64bit PE File"
-        else:
             self.ftype = "32bit PE File"
+        else:
+            self.ftype = "64bit PE File"
 
         #Compiled Time    
-        self.compile_time = ("Compiled Time: " + pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
+        self.compile_time = ("Compiled Time: " +
+                             pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
 
     def elffile_info(self,handle):
         ABItypes = {
