@@ -9,6 +9,7 @@ def main():
         fileh = open(sys.argv[1], "rb")
         fclass = data(fileh)
         fclass.printVals()
+        fclass.createLogFile()
 
     except IndexError:
         print("Please provide input file as argument")
@@ -22,18 +23,16 @@ class data():
         self.fhash = self.hashfile()
 
         if self.ftype == "PE File":
-            self.binbool = True
             pe = pefile.PE(sys.argv[1])
             self.pefile_info(pe)
         elif self.ftype == "ELF File":
-            self.binbool = True
             self.elffile_info(self.handle)
         else:
-            self.binbool = False
+            pass
 
     def getFileType(self):
         # Grab file type based on magic number.
-        
+
         ftypes = {
             b"MZ\x90" : "PE File",
             b"\x7fEL" : "ELF File",
@@ -43,14 +42,13 @@ class data():
             b"\x75\x73\x74" : "Tar Folder",
             b"\xd0\xcf\x11" : "Microsoft Installer"
         }
-        
+
         magic = self.handle.read(3)
         self.handle.seek(0)
         for key,value in ftypes.items():
             if magic == key:
                 return value
-            else:
-                return "Unknown File Type"
+        return "Unknown File Type"
 
     def hashfile(self):
         # Produce MD5, SHA1, and SHA256 hashes. returns as class var.
@@ -78,43 +76,42 @@ class data():
         return hashes
 
     def pefile_info(self, pe):
-        #Check if it is a 32-bit or 64-bit binary
+        # Check if it is a 32-bit or 64-bit binary
         if hex(pe.FILE_HEADER.Machine) == '0x14c':
             self.ftype = "32bit PE File"
         else:
             self.ftype = "64bit PE File"
 
-        #Compiled Time    
-        self.compile_time = ("Compiled Time: " +
-                             pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
+        # Compiled Time
+        self.compile_time = (pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
 
     def elffile_info(self,handle):
         ABItypes = {
-            0 : "System V",
-            1 : "HP-UX",
-            2 : "NetBSD",
-            3 : "Linux",
-            4 : "GNU Hurd",
-            6 : "Solaris",
-            7 : "AIX",
-            8 : "IRIX",
-            9 : "FreeBSD",
-            10: "Tru64",
-            11: "Novell Modesto",
-            12: "OpenBSD",
-            13: "OpenVMS",
-            14: "NonStop Kernel",
-            15: "AROS",
-            16: "Fenix OS",
-            17: "CloudABI",
-            18: "Stratus Technologies OpenVOS"
+            0x0 : "System V",
+            0x1 : "HP-UX",
+            0x2 : "NetBSD",
+            0x3 : "Linux",
+            0x4 : "GNU Hurd",
+            0x6 : "Solaris",
+            0x7 : "AIX",
+            0x8 : "IRIX",
+            0x9 : "FreeBSD",
+            0xA: "Tru64",
+            0xB: "Novell Modesto",
+            0xC: "OpenBSD",
+            0xD: "OpenVMS",
+            0xE: "NonStop Kernel",
+            0xF: "AROS",
+            0x10: "Fenix OS",
+            0x11: "CloudABI",
+            0x12: "Stratus Technologies OpenVOS"
             }
         Objtypes = {
-            0 : "None",
-            1 : "Relocatable",
-            2 : "Executable",
-            3 : "Shared Object",
-            4 : "Core"
+            0x0 : "None",
+            0x1 : "Relocatable",
+            0x2 : "Executable",
+            0x3 : "Shared Object",
+            0x4 : "Core"
             }
         Machtypes = {
             0x00 : "No specific instruction set",
@@ -169,36 +166,36 @@ class data():
             0xF7 : "Berkeley Packet Filter",
             0x101 : "WDC 65C816"
             }
-        
-        #Grab Header
+
+        # Grab Header
         elf_head = self.handle.read(0x14)
-        
-        #Check if it is a 32-bit or 64-bit binary
-        if elf_head[4] == 2:
+
+        # Check if it is a 32-bit or 64-bit binary
+        if elf_head[0x4] == 0x2:
             self.ftype = "64bit ELF File"
         else:
             self.ftype = "32bit ELF File"
 
-        #Check ABI
+        # Check ABI
         abi = elf_head[0x7]
         for key,value in ABItypes.items():
             if abi == key:
                 self.abi = value
 
-        #Check Object File Type
+        # Check Object File Type
         objtype = elf_head[0x10]
         for key,value in Objtypes.items():
             if objtype == key:
                 self.objtype = value
 
-        #Check Machine Type
+        # Check Machine Type
         machtype = elf_head[0x12]
         for key,value in Machtypes.items():
             if machtype == key:
                 self.machtype = value
-                
+
     def printVals(self):
-        #Produces output
+        # Print output to console
 
         print("\nStandard Data:")
         print("File Name: " + sys.argv[1])
@@ -208,13 +205,42 @@ class data():
         print("SHA1: " + self.fhash[1])
         print("SHA256: " + self.fhash[2])
 
-        #Conditional prints based on file type
-        #if self.binbool == True:
+        # Conditional prints based on file type
+        if "PE" in self.ftype:
+            print("\nPE Data:")
+            print("Compiled Time: " + self.compile_time)
         #    print(self.compile_time)
         if "ELF" in self.ftype:
             print("\nELF Data:")
             print("ABI: " + self.abi)
             print("Object File Type: " + self.objtype)
             print("Machine Type: " + self.machtype)
+
+    def createLogFile(self):
+        # Print output to log file
+        hLogFile = open(sys.argv[1] + "_TRIAGE_LOG.txt", "a")
+        welcome = "TRIAGEBOI Log Output For File: " + sys.argv[1] + "\n\n" + \
+                  "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)\n\n"
+        hLogFile.write(welcome)
+
+        hLogFile.write("\nStandard Data:\n")
+        hLogFile.write("File Name: " + sys.argv[1] + "\n")
+        hLogFile.write("File Size: " + str(self.fsize) + " Bytes\n")
+        hLogFile.write("File Type: " + str(self.ftype) + "\n")
+        hLogFile.write("MD5: " + self.fhash[0] + "\n")
+        hLogFile.write("SHA1: " + self.fhash[1] + "\n")
+        hLogFile.write("SHA256: " + self.fhash[2] + "\n")
+
+        # Conditional prints based on file type
+        if "PE" in self.ftype:
+            hLogFile.write("\nPE Data:\n")
+            hLogFile.write("Compiled Time: " + self.compile_time + "\n")
+        elif "ELF" in self.ftype:
+            hLogFile.write("\nELF Data:\n")
+            hLogFile.write("ABI: " + self.abi + "\n")
+            hLogFile.write("Object File Type: " + self.objtype + "\n")
+            hLogFile.write("Machine Type: " + self.machtype + "\n")
+
+        hLogFile.close()
 
 main()
