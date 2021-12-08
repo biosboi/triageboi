@@ -1,17 +1,19 @@
-import sys
 import hashlib
+import json
 import os
 import pefile
-import json
+import re
 import requests
+import sys
 
 
 def main():
     try:
         fileh = open(sys.argv[1], "rb")
         fclass = data(fileh)
-        #fclass.printVals()
         fclass.vtSearch()
+        fclass.susStrSearch()
+        fclass.printVals()
         fclass.createLogFile()
 
     except IndexError:
@@ -28,10 +30,12 @@ class data():
         if self.ftype == "PE File":
             pe = pefile.PE(sys.argv[1])
             self.pefile_info(pe)
+            if self.isDLL == True:
+                self.exportData = self.dll_data(pe)
         elif self.ftype == "ELF File":
             self.elffile_info(self.handle)
         else:
-            pass
+            self.isDLL = False
 
     def getFileType(self):
         # Grab file type based on magic number.
@@ -88,10 +92,29 @@ class data():
         # Looking if it's a DLL or EXE
         if pe.dump_dict()['FILE_HEADER']['Characteristics']['Value'] & 0x2000:
             self.ftype += ' (DLL)'
+            self.isDLL = True
+        else:
+            self.isDLL = False
 
         # Compiled Time
         self.compile_time = (pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
-
+        
+        # Imphash
+    
+    def dll_data(self,pe):
+        # Grab Export Data
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]])
+        exportData = "Ordinal: | Export Name:\n"
+        
+        ords = [(e.ordinal) for e in pe.DIRECTORY_ENTRY_EXPORT.symbols]
+        exports = [(e.name) for e in pe.DIRECTORY_ENTRY_EXPORT.symbols]
+        i = 0
+        while i < len(ords):
+            exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-8") + "\n")
+            i+=1
+        
+        return exportData
+    
     def elffile_info(self,handle):
         ABItypes = {
             0x0 : "System V",
@@ -234,6 +257,9 @@ class data():
                 hVTLog.write(self.VTOutput)
                 hVTLog.close()
 
+    def susStrSearch(self):
+        pass
+
     def printVals(self):
         # Print output to console
         print("\nStandard Data:")
@@ -248,12 +274,22 @@ class data():
         if "PE" in self.ftype:
             print("\nPE Data:")
             print("Compiled Time: " + self.compile_time)
-        #    print(self.compile_time)
+        if self.isDLL == True:
+            print("\n\nDLL Data:")
+            print(self.exportData)
         if "ELF" in self.ftype:
             print("\nELF Data:")
             print("ABI: " + self.abi)
             print("Object File Type: " + self.objtype)
             print("Machine Type: " + self.machtype)
+            
+        # Write VT results to Log file
+        print("\nVirusTotal Data:")
+        if self.VTsuccess == True:
+            print("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']))
+            print("\nLink to Report: " + str(self.result['permalink']))
+        else:
+            print("\nImplement VirusTotal API Key for VirusTotal Results")
 
     def createLogFile(self):
         # Write output to log file
@@ -272,16 +308,19 @@ class data():
 
         # Conditional prints based on file type
         if "PE" in self.ftype:
-            hLogFile.write("\nPE Data:\n")
+            hLogFile.write("\n\nPE Data:\n")
             hLogFile.write("Compiled Time: " + self.compile_time + "\n")
+        if self.isDLL == True:
+            hLogFile.write("\n\nDLL Data:")
+            hLogFile.write("\n" + self.exportData)
         elif "ELF" in self.ftype:
-            hLogFile.write("\nELF Data:\n")
+            hLogFile.write("\n\nELF Data:\n")
             hLogFile.write("ABI: " + self.abi + "\n")
             hLogFile.write("Object File Type: " + self.objtype + "\n")
             hLogFile.write("Machine Type: " + self.machtype + "\n")
 
         # Write VT results to Log file
-        hLogFile.write("\nVirusTotal Data:")
+        hLogFile.write("\n\nVirusTotal Data:")
         if self.VTsuccess == True:
             hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']))
             hLogFile.write("\nLink to Report: " + str(self.result['permalink']))
