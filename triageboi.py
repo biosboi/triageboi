@@ -28,6 +28,7 @@ class data():
         self.fhash = self.hashfile()
 
         self.isDLL = False
+        self.isPacked = False
         if self.ftype == "PE File":
             pe = pefile.PE(sys.argv[1])
             self.pefile_info(pe)
@@ -150,7 +151,7 @@ class data():
         self.peSections = ""
         for section in pe.sections:
             print(section.Misc_VirtualSize)
-            if "UPX" in section.Name.decode('utf-8')
+            if "UPX" in section.Name.decode('utf-8'):
                 self.isPacked = True
             self.peSections += section.Name.decode('utf-8')
             self.peSections += "\n\tVirtual Address: " + hex(section.VirtualAddress) + "\n"
