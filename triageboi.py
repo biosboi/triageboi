@@ -21,7 +21,7 @@ def main():
 
 class data():
     def __init__(self, handle):
-        self.triagefile = os.path.basename(sys.argv[1])
+        self.fname = os.path.basename(sys.argv[1])
         self.handle = handle
         self.fsize = os.path.getsize(sys.argv[1])
         self.ftype = self.getFileType()
@@ -135,10 +135,27 @@ class data():
         self.compile_time = (pe.FILE_HEADER.dump_dict()['TimeDateStamp']['Value'].split('[')[1][:-1])
 
         # Imphash
-        self.imphash = pe.get_imphash()
+        self.imphash = pe.get_imphash().upper()
 
         # Rich Header Hash
-        self.rHeadHash = pe.get_rich_header_hash()
+        self.rHeadHash = pe.get_rich_header_hash().upper()
+
+        # Get Imports
+        self.peImports = ""
+        self.peImports = "\nImported DLLs:\n"
+        for i in pe.DIRECTORY_ENTRY_IMPORT:
+            self.peImports += i.dll.decode('utf-8') + "\n"
+
+        # Section data
+        self.peSections = ""
+        for section in pe.sections:
+            print(section.Misc_VirtualSize)
+            if "UPX" in section.Name.decode('utf-8')
+                self.isPacked = True
+            self.peSections += section.Name.decode('utf-8')
+            self.peSections += "\n\tVirtual Address: " + hex(section.VirtualAddress) + "\n"
+            self.peSections += "\tVirtual Size: " + hex(section.Misc_VirtualSize) + "\n"
+            self.peSections += "\tRaw Size: " + hex(section.SizeOfRawData) + "\n"
 
     def dll_data(self,pe):
         # Grab Export Data
@@ -149,7 +166,10 @@ class data():
         exports = [(e.name) for e in pe.DIRECTORY_ENTRY_EXPORT.symbols]
         i = 0
         while i < len(ords):
-            exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-8") + "\n")
+            if i < 9:
+                exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-8") + "\n")
+            else:
+                exportData += (str(ords[i]) + "       | " + exports[i].decode("utf-8") + "\n")
             i+=1
 
         return exportData
@@ -303,7 +323,7 @@ class data():
     def printVals(self):
         # Print output to console
         print("\nStandard Data:" + \
-               "\nFile Name: " + str(self.triagefile) + \
+               "\nFile Name: " + str(self.fname) + \
                "\nFile Size: " + str(self.fsize) + " Bytes" + \
                "\nFile Type: " + str(self.ftype) + \
                "\nMD5: " + self.fhash[0] + \
@@ -317,9 +337,11 @@ class data():
                   "\nImphash: " + self.imphash + \
                   "\nRich Header Hash: " + self.rHeadHash + \
                   "\nCompiled Time: " + self.compile_time)
-        if self.isDLL == True:
-            print("\n\nDLL Data:" + \
-                  self.exportData)
+            print(self.peImports)
+            if self.isDLL == True:
+                print("\nExports:\n" + \
+                      self.exportData)
+            print("\nSection Data:\n" + self.peSections)
         if "ELF" in self.ftype:
             print("\nELF Data:" + \
                   "\nABI: " + self.abi + \
@@ -336,16 +358,16 @@ class data():
 
     def createLogFile(self):
         # Write output to log file
-        hLogFile = open(self.triagefile + "_TRIAGE_LOG.txt", "a")
-        hLogFile.write("\n" + "-"*65 + "\nTRIAGEBOI Log Output For File: " + self.triagefile + "\n\n" + \
+        hLogFile = open(self.fname + "_TRIAGE_LOG.txt", "a")
+        hLogFile.write("\n" + "-"*65 + "\nTRIAGEBOI Log Output For File: " + self.fname + "\n\n" + \
                        "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*65 + "\n")
         hLogFile.write("\nStandard Data:" + \
-                        "\nFile Name: " + str(self.triagefile) + \
-                        "\nFile Size: " + str(self.fsize) + " Bytes" + \
-                        "\nFile Type: " + str(self.ftype) + \
+                        "\nFile Name: " + str(self.fname) + \
                         "\nMD5: " + self.fhash[0] + \
                         "\nSHA1: " + self.fhash[1] + \
-                        "\nSHA256: " + self.fhash[2] + "\n")
+                        "\nSHA256: " + self.fhash[2] + \
+                        "\nFile Size: " + str(self.fsize) + " Bytes" + \
+                        "\nFile Type: " + str(self.ftype) + "\n")
 
         # Conditional prints based on file type
         if "PE" in self.ftype:
@@ -354,9 +376,58 @@ class data():
                            "\nImphash: " + self.imphash + \
                            "\nRich Header Hash: " + self.rHeadHash + \
                            "\nCompiled Time: " + self.compile_time + "\n")
-        if self.isDLL == True:
-            hLogFile.write("\n\nDLL Data:" + \
-                           "\n" + self.exportData)
+            if self.isPacked == True:
+                hLogFile.write("\nThis file is likely packed.\n")
+            hLogFile.write(self.peImports)
+            if self.isDLL == True:
+                hLogFile.write("\n\nExports:" + \
+                               "\n" + self.exportData)
+            hLogFile.write("\nSection Data:\n" + self.peSections)
+        if "ELF" in self.ftype:
+            hLogFile.write("\n\nELF Data:" + \
+                           "\nABI: " + self.abi + \
+                           "\nObject File Type: " + self.objtype + \
+                           "\nMachine Type: " + self.machtype)
+
+        # Write VT results to Log file
+        hLogFile.write("\n\nVirusTotal Data:")
+        if self.VTsuccess == True:
+            hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
+                           "\nLink to Report: " + str(self.result['permalink']))
+        else:
+            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results")
+
+        hLogFile.close()
+
+    def jiraFormat(self):
+        # Write output to log file
+        hLogFile = open(self.fname + "_JIRA_INPUT.txt", "a")
+        hLogFile.write("\n" + "-"*65 + "\nTRIAGEBOI Log Output For File: " + self.fname + "\n\n" + \
+                       "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*65 + "\n")
+
+        hLogFile.write("\n|+*Metadata Details*+|********|\n" + \
+                       "\n|*Filename*|" + str(self.fname) + "|" + \
+                       "\n|*VALUE*|" + "|" + \
+                       "\n|*MD5*|" + self.fhash[0] + "|" + \
+                       "\n|*SHA1*|" + self.fhash[1] + "|" + \
+                       "\n|*SHA256*|" + self.fhash[2] + "|" + \
+                       "\n|*File Size*|" + str(self.fsize) + " Bytes" + "|" + \
+                       "\n|*File Type*|" + str(self.ftype) + "|" + \
+                       "\n|*V/T*||" + \
+                       "\n|Poss. Attribution*||" + \
+                       "\n|Family||")
+
+        # Conditional prints based on file type
+        if "PE" in self.ftype:
+            hLogFile.write("\n\n|+*PE Data*+|********|" + "|" + \
+                           "\n|*Compile Time*|" + self.compile_time + "|" + \
+                           "\n|*Machine Type*|" + self.peMachType + "|" + \
+                           "\n|*Imphash*|" + self.imphash + "|" + \
+                           "\n|*Rich Header Hash*|" + self.rHeadHash + "|")
+            hLogFile.write(self.peImports)
+            if self.isDLL == True:
+                hLogFile.write("\n\nExports:" + \
+                               "\n" + self.exportData)
         elif "ELF" in self.ftype:
             hLogFile.write("\n\nELF Data:" + \
                            "\nABI: " + self.abi + \
