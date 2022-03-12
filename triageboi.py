@@ -7,30 +7,64 @@ import requests
 import sys
 
 
-def main():
-    try:
-        fileh = open(sys.argv[1], "rb")
-        fclass = data(fileh)
-        fclass.vtSearch()
-        fclass.printVals()
-        fclass.createLogFile()
 
-    except IndexError:
-        print("Please provide input file as argument")
+def main():
+    global wholeDir
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "help":
+            # Access the help menu and exit
+            helpMenu()
+            return
+        try:
+            # Run against single file
+            wholeDir = False
+            fileh = open(sys.argv[1], "rb")
+            startup(fileh,sys.argv[1])
+        except FileNotFoundError:
+            print("Please provide a valid input file as an argument.")
+    else:
+        # Run against entire directory
+        wholeDir = True
+        filelist = []
+        x = os.listdir()
+        for file in x:
+            if "triageboi" in file or os.path.isdir(file):
+                pass
+            else:
+                filelist.append(file)
+
+        for i in filelist:
+            # Run against each file
+            fileh = open(i, "rb")
+            startup(fileh, i)
+
+        print("Congratulations, your directory has been triageboi'd! \nPlease refer to the dropped log files for further information.")
+
+def startup(fd, path):
+    fclass = data(fd, path)
+    fclass.vtSearch()
+    fclass.createLogFile()
+
+    if "-j" in sys.argv or wholeDir:
+        fclass.jiraFormat()
+    if not wholeDir:
+        fclass.printVals()
+
 
 
 class data():
-    def __init__(self, handle):
-        self.fname = os.path.basename(sys.argv[1])
+    def __init__(self, handle, path):
+        self.path = path
+        self.fname = os.path.basename(self.path)
         self.handle = handle
-        self.fsize = os.path.getsize(sys.argv[1])
+        self.fsize = os.path.getsize(self.path)
         self.ftype = self.getFileType()
         self.fhash = self.hashfile()
 
         self.isDLL = False
-        self.isPacked = False
+        self.isPacked = ""
         if self.ftype == "PE File":
-            pe = pefile.PE(sys.argv[1])
+            pe = pefile.PE(self.path)
             self.pefile_info(pe)
             if self.isDLL == True:
                 self.exportData = self.dll_data(pe)
@@ -43,19 +77,23 @@ class data():
         # Grab file type based on magic number.
 
         ftypes = {
-            b"MZ\x90" : "PE File",
+            b"MZ" : "PE File",
             b"\x7fEL" : "ELF File",
-            b"PK\x03" : "DOCX/XLSX/PPTX/Jar/Zip Folder",
+            b"PK" : "DOCX/XLSX/PPTX/Jar/Zip Folder",
             b"\x25PD" : "PDF Document",
-            b"\x1f\x8b\x08" : "GZip Folder",
+            b"\x1f\x8b" : "GZip Folder",
             b"\x75\x73\x74" : "Tar Folder",
-            b"\xd0\xcf\x11" : "Microsoft Installer"
+            b"\xd0\xcf\x11" : "Microsoft Installer",
+            b"\x1f\x9d" : "Compressed File (Tar or Zip)",
+            b"\x1f\xa0" : "Compressed File (Tar or Zip)",
+            b"\xff\xd8" : "JPEG File",
+            b"\x37\x7a\xbc" : "7-Zip File",
         }
 
         magic = self.handle.read(3)
         self.handle.seek(0)
         for key,value in ftypes.items():
-            if magic == key:
+            if key in magic:
                 return value
         return "Unknown File Type"
 
@@ -63,17 +101,17 @@ class data():
         # Produce MD5, SHA1, and SHA256 hashes. returns as class var.
 
         md5 = hashlib.md5()
-        with open(sys.argv[1], 'rb') as afile:
+        with open(self.path, 'rb') as afile:
             buf = afile.read()
             md5.update(buf)
 
         sha1 = hashlib.sha1()
-        with open(sys.argv[1], 'rb') as afile:
+        with open(self.path, 'rb') as afile:
             buf = afile.read()
             sha1.update(buf)
 
         sha256 = hashlib.sha256()
-        with open(sys.argv[1], 'rb') as afile:
+        with open(self.path, 'rb') as afile:
             buf = afile.read()
             sha256.update(buf)
 
@@ -143,20 +181,37 @@ class data():
 
         # Get Imports
         self.peImports = ""
-        self.peImports = "\nImported DLLs:\n"
+        self.peImports = "\nImports:\n"
         for i in pe.DIRECTORY_ENTRY_IMPORT:
             self.peImports += i.dll.decode('utf-8') + "\n"
 
         # Section data
+        self.commonSections = {".text",".bss",".rdata",".data",".pdata",".reloc",".edata",".idata",".tls",".debug",".rsrc"}
         self.peSections = ""
+        self.funkySections = []
         for section in pe.sections:
-            print(section.Misc_VirtualSize)
             if "UPX" in section.Name.decode('utf-8'):
-                self.isPacked = True
+                self.isPacked = "UPX"
+
+            #self.funkySections.append(section.Name.decode('utf-8'))
+
             self.peSections += section.Name.decode('utf-8')
             self.peSections += "\n\tVirtual Address: " + hex(section.VirtualAddress) + "\n"
             self.peSections += "\tVirtual Size: " + hex(section.Misc_VirtualSize) + "\n"
-            self.peSections += "\tRaw Size: " + hex(section.SizeOfRawData) + "\n"
+            self.peSections += "\tRaw Size: " + hex(section.SizeOfRawData) + "\n\n"
+        for i in self.funkySections:
+            print(self.funkySections)
+            print(i)
+            if i in self.commonSections:
+                self.funkySections.remove(i)
+                print(self.funkySections)
+        #if self.funkySections:
+        #    self.peSections += "Odd section names were found:\n"
+        #    for i in self.funkySections:
+        #        self.peSections += i + "\n"
+
+
+
 
     def dll_data(self,pe):
         # Grab Export Data
@@ -168,9 +223,9 @@ class data():
         i = 0
         while i < len(ords):
             if i < 9:
-                exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-8") + "\n")
+                exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-16") + "\n")
             else:
-                exportData += (str(ords[i]) + "       | " + exports[i].decode("utf-8") + "\n")
+                exportData += (str(ords[i]) + "       | " + exports[i].decode("utf-16") + "\n")
             i+=1
 
         return exportData
@@ -320,9 +375,13 @@ class data():
 
     def susStrSearch(self):
         pass
+        # Will will finish this when will wills himself to finish this.
 
     def printVals(self):
-        # Print output to console
+        print("\n" + "-"*65 + "\nTRIAGEBOI Console Output For File: " + self.fname + "\n\n" + \
+               "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*65 + "\n")
+        print("Give argument \"help\" for the help menu.")
+        # Print output to console. Same as what's put into the triagelog file.
         print("\nStandard Data:" + \
                "\nFile Name: " + str(self.fname) + \
                "\nFile Size: " + str(self.fsize) + " Bytes" + \
@@ -330,6 +389,9 @@ class data():
                "\nMD5: " + self.fhash[0] + \
                "\nSHA1: " + self.fhash[1] + \
                "\nSHA256: " + self.fhash[2] + "\n")
+
+        if self.isPacked:
+            print("\nThis file is " + self.isPacked + " packed.\n")
 
         # Conditional prints based on file type
         if "PE" in self.ftype:
@@ -349,7 +411,7 @@ class data():
                   "\nObject File Type: " + self.objtype + \
                   "\nMachine Type: " + self.machtype + "\n")
 
-        # Write VT results to Log file
+        # Print VT results
         print("\nVirusTotal Data:")
         if self.VTsuccess == True:
             print("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
@@ -359,7 +421,10 @@ class data():
 
     def createLogFile(self):
         # Write output to log file
-        hLogFile = open(self.fname + "_TRIAGE_LOG.txt", "a")
+        if wholeDir:
+            hLogFile = open("triageboi_LOG.txt", "a")
+        else:
+            hLogFile = open(self.fname + "_triageboi_LOG.txt", "a")
         hLogFile.write("\n" + "-"*65 + "\nTRIAGEBOI Log Output For File: " + self.fname + "\n\n" + \
                        "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*65 + "\n")
         hLogFile.write("\nStandard Data:" + \
@@ -377,12 +442,15 @@ class data():
                            "\nImphash: " + self.imphash + \
                            "\nRich Header Hash: " + self.rHeadHash + \
                            "\nCompiled Time: " + self.compile_time + "\n")
-            if self.isPacked == True:
-                hLogFile.write("\nThis file is likely packed.\n")
+            if self.isPacked:
+                hLogFile.write("\nThis file is " + self.isPacked + " packed.\n")
             hLogFile.write(self.peImports)
             if self.isDLL == True:
-                hLogFile.write("\n\nExports:" + \
-                               "\n" + self.exportData)
+                try:
+                    hLogFile.write("\n\nExports:" + \
+                                   "\n" + self.exportData)
+                except UnicodeEncodeError:
+                    hLogFile.write("\nUnicode Translation error while parsing exports. Working on it\n")
             hLogFile.write("\nSection Data:\n" + self.peSections)
         if "ELF" in self.ftype:
             hLogFile.write("\n\nELF Data:" + \
@@ -396,13 +464,16 @@ class data():
             hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
                            "\nLink to Report: " + str(self.result['permalink']))
         else:
-            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results")
+            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results\n\n\n")
 
         hLogFile.close()
 
     def jiraFormat(self):
         # Write output to log file
-        hLogFile = open(self.fname + "_JIRA_INPUT.txt", "a")
+        if wholeDir:
+            hLogFile = open("triageboi_JIRA.txt", "a")
+        else:
+            hLogFile = open(self.fname + "_triageboi_JIRA.txt", "a")
         hLogFile.write("\n" + "-"*65 + "\nTRIAGEBOI Log Output For File: " + self.fname + "\n\n" + \
                        "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*65 + "\n")
 
@@ -416,7 +487,10 @@ class data():
                        "\n|*File Type*|" + str(self.ftype) + "|" + \
                        "\n|*V/T*||" + \
                        "\n|Poss. Attribution*||" + \
-                       "\n|Family||")
+                       "\n|Family||\n")
+
+        if self.isPacked:
+            hLogFile.write("\nThis file is " + self.isPacked + " packed.\n")
 
         # Conditional prints based on file type
         if "PE" in self.ftype:
@@ -424,11 +498,14 @@ class data():
                            "\n|*Compile Time*|" + self.compile_time + "|" + \
                            "\n|*Machine Type*|" + self.peMachType + "|" + \
                            "\n|*Imphash*|" + self.imphash + "|" + \
-                           "\n|*Rich Header Hash*|" + self.rHeadHash + "|")
+                           "\n|*Rich Header Hash*|" + self.rHeadHash + "|\n")
             hLogFile.write(self.peImports)
             if self.isDLL == True:
-                hLogFile.write("\n\nExports:" + \
-                               "\n" + self.exportData)
+                try:
+                    hLogFile.write("\n\nExports:" + \
+                                   "\n" + self.exportData)
+                except UnicodeEncodeError:
+                    hLogFile.write("\nUnicode Translation error while parsing exports. Working on it\n")
         elif "ELF" in self.ftype:
             hLogFile.write("\n\nELF Data:" + \
                            "\nABI: " + self.abi + \
@@ -441,9 +518,19 @@ class data():
             hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
                            "\nLink to Report: " + str(self.result['permalink']))
         else:
-            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results")
+            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results\n\n\n")
 
         hLogFile.close()
+
+def helpMenu():
+    a = 0
+    print("\n" + "-"*70 + "\n" + "-"*70 + "\nWelcome to the TRIAGEBOI Help Menu\n\n" + \
+           "TRIAGEBOI is Written and directed by [William (Nathan] Robinson)" + "\n" + "-"*70 + "\n\n" + \
+           "Thanks for accessing the help menu. You are number " + str(id(a)) + " in queue.\n\n" + \
+           "Run triageboi with no arguments to log the entire current directory. \nDrag and drop a " + \
+           "file to log only that file. \n\nAdd a '-j' argument to produce a JIRA ready log file.\n\n" + \
+           "Running against an entire directory will produce both a regular log file and a JIRA ready log file.\n" + \
+           "-"*70)
 
 if __name__ == "__main__":
     main()
