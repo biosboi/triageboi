@@ -66,11 +66,12 @@ class data():
         if self.ftype == "PE File":
             pe = pefile.PE(self.path)
             self.pefile_info(pe)
-            if self.isDLL == True:
+            if self.isDLL:
                 self.exportData = self.dll_data(pe)
         elif self.ftype == "ELF File":
             self.elffile_info(self.handle)
         else:
+            # If additional file type parsers are built, they will go here.
             pass
 
     def getFileType(self):
@@ -79,15 +80,19 @@ class data():
         ftypes = {
             b"MZ" : "PE File",
             b"\x7fEL" : "ELF File",
-            b"PK" : "DOCX/XLSX/PPTX/Jar/Zip Folder",
+            b"PK" : "DOCX/XLSX/PPTX/Jar/Zip File",
             b"\x25PD" : "PDF Document",
-            b"\x1f\x8b" : "GZip Folder",
-            b"\x75\x73\x74" : "Tar Folder",
+            b"\x1f\x8b" : "GZip File",
+            b"\x75\x73\x74" : "Tar Archive",
             b"\xd0\xcf\x11" : "Microsoft Installer",
             b"\x1f\x9d" : "Compressed File (Tar or Zip)",
             b"\x1f\xa0" : "Compressed File (Tar or Zip)",
-            b"\xff\xd8" : "JPEG File",
+            b"\x52\x61\x72" : "Rar Archive",
             b"\x37\x7a\xbc" : "7-Zip File",
+            b"\xff\xd8" : "JPEG Image",
+            b"\x89PN" : "PNG Image",
+            b"BM" : "BMP Image",
+            b"GIF" : "GIF Image",
         }
 
         magic = self.handle.read(3)
@@ -98,23 +103,27 @@ class data():
         return "Unknown File Type"
 
     def hashfile(self):
-        # Produce MD5, SHA1, and SHA256 hashes. returns as class var.
+        # Produce MD5, SHA1, and SHA256 hashes. returns as tuple.
 
+        # MD5
+        self.handle.seek(0)
         md5 = hashlib.md5()
-        with open(self.path, 'rb') as afile:
-            buf = afile.read()
-            md5.update(buf)
+        buf = self.handle.read()
+        md5.update(buf)
 
+        # SHA-1
+        self.handle.seek(0)
         sha1 = hashlib.sha1()
-        with open(self.path, 'rb') as afile:
-            buf = afile.read()
-            sha1.update(buf)
+        buf = self.handle.read()
+        sha1.update(buf)
 
+        # SHA-256
+        self.handle.seek(0)
         sha256 = hashlib.sha256()
-        with open(self.path, 'rb') as afile:
-            buf = afile.read()
-            sha256.update(buf)
+        buf = self.handle.read()
+        sha256.update(buf)
 
+        # Build tuple
         md5 = md5.hexdigest().upper()
         sha1 = sha1.hexdigest().upper()
         sha256 = sha256.hexdigest().upper()
@@ -199,17 +208,13 @@ class data():
             self.peSections += "\n\tVirtual Address: " + hex(section.VirtualAddress) + "\n"
             self.peSections += "\tVirtual Size: " + hex(section.Misc_VirtualSize) + "\n"
             self.peSections += "\tRaw Size: " + hex(section.SizeOfRawData) + "\n\n"
-        for i in self.funkySections:
-            print(self.funkySections)
-            print(i)
-            if i in self.commonSections:
-                self.funkySections.remove(i)
-                print(self.funkySections)
+
         #if self.funkySections:
         #    self.peSections += "Odd section names were found:\n"
         #    for i in self.funkySections:
         #        self.peSections += i + "\n"
 
+        # Trying to add check against common section names and will separately list uncommon ones.
 
 
 
@@ -223,9 +228,9 @@ class data():
         i = 0
         while i < len(ords):
             if i < 9:
-                exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-16") + "\n")
+                exportData += (str(ords[i]) + "        | " + exports[i].decode("utf-8") + "\n")
             else:
-                exportData += (str(ords[i]) + "       | " + exports[i].decode("utf-16") + "\n")
+                exportData += (str(ords[i]) + "       | " + exports[i].decode("utf-8") + "\n")
             i+=1
 
         return exportData
@@ -529,7 +534,7 @@ def helpMenu():
            "Thanks for accessing the help menu. You are number " + str(id(a)) + " in queue.\n\n" + \
            "Run triageboi with no arguments to log the entire current directory. \nDrag and drop a " + \
            "file to log only that file. \n\nAdd a '-j' argument to produce a JIRA ready log file.\n\n" + \
-           "Running against an entire directory will produce both a regular log file and a JIRA ready log file.\n" + \
+           "Running against an entire directory will produce both a consolidated regular log file and a JIRA ready log file.\n" + \
            "-"*70)
 
 if __name__ == "__main__":
