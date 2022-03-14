@@ -9,6 +9,12 @@ import sys
 
 
 def main():
+    global apikey
+    # \/\/INSERT VT API KEY IF YOU WANT THIS TO WORK\/\/
+    apikey = ''
+    # /\/\INSERT VT API KEY IF YOU WANT THIS TO WORK/\/\
+
+
     global wholeDir
     if len(sys.argv) > 1:
         if sys.argv[1] == "help":
@@ -42,15 +48,12 @@ def main():
 
 def startup(fd, path):
     fclass = data(fd, path)
-    fclass.vtSearch()
     fclass.createLogFile()
 
     if "-j" in sys.argv or wholeDir:
         fclass.jiraFormat()
     if not wholeDir:
         fclass.printVals()
-
-
 
 class data():
     def __init__(self, handle, path):
@@ -60,6 +63,7 @@ class data():
         self.fsize = os.path.getsize(self.path)
         self.ftype = self.getFileType()
         self.fhash = self.hashfile()
+        self.VTsuccess = self.vtSearch()
 
         self.isDLL = False
         self.isPacked = ""
@@ -318,6 +322,7 @@ class data():
             }
 
         # Grab Header
+        self.handle.seek(0)
         elf_head = self.handle.read(0x14)
 
         # Check if it is a 32-bit or 64-bit binary
@@ -346,23 +351,17 @@ class data():
 
     def vtSearch(self):
         # Send file to VT
-
-        # \/\/INSERT VT API KEY IF YOU WANT THIS TO WORK\/\/
-        apikey = '<INSERT_VT_API_KEY>'
-        # /\/\INSERT VT API KEY IF YOU WANT THIS TO WORK/\/\
-
-        if apikey == '<INSERT_VT_API_KEY>':
-            self.VTsuccess = False
+        if not apikey:
+            return False
         else:
             api_url = 'https://www.virustotal.com/vtapi/v2/file/scan'
             params = dict(apikey=apikey)
-            with open(sys.argv[1], 'rb') as file:
-                files = dict(file=(sys.argv[1], file))
-                response = requests.post(api_url, files=files, params=params)
+            files = dict(file=(self.fname, self.handle))
+            response = requests.post(api_url, files=files, params=params)
             if response.status_code == 200:
-                self.VTsuccess = True
                 result=response.json()
-                print(json.dumps(result, sort_keys=False, indent=4))
+            else:
+                return False
 
             # Retrieve Report from VT
             api_url = 'https://www.virustotal.com/vtapi/v2/file/report'
@@ -373,10 +372,12 @@ class data():
                 self.VTOutput = json.dumps(self.result, sort_keys=False, indent=4)
 
                 # Write VT JSON Log
-                hVTLog = open(sys.argv[1] + "_VT_REPORT.json", "a")
+                hVTLog = open(self.fname + "_VT_REPORT.json", "a")
                 hVTLog.write(self.VTOutput)
                 hVTLog.close()
-            hVTLog.close()
+            else:
+                return False
+            return True
 
     def susStrSearch(self):
         pass
@@ -395,6 +396,14 @@ class data():
                "\nSHA1: " + self.fhash[1] + \
                "\nSHA256: " + self.fhash[2] + "\n")
 
+        # Print VT results
+        print("\nVirusTotal Data:")
+        if self.VTsuccess:
+            print("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
+                  "\nLink to Report: \n" + str(self.result['permalink']))
+        else:
+            print("Implement VirusTotal API Key for VirusTotal Results")
+
         if self.isPacked:
             print("\nThis file is " + self.isPacked + " packed.\n")
 
@@ -406,7 +415,7 @@ class data():
                   "\nRich Header Hash: " + self.rHeadHash + \
                   "\nCompiled Time: " + self.compile_time)
             print(self.peImports)
-            if self.isDLL == True:
+            if self.isDLL:
                 print("\nExports:\n" + \
                       self.exportData)
             print("\nSection Data:\n" + self.peSections)
@@ -415,14 +424,6 @@ class data():
                   "\nABI: " + self.abi + \
                   "\nObject File Type: " + self.objtype + \
                   "\nMachine Type: " + self.machtype + "\n")
-
-        # Print VT results
-        print("\nVirusTotal Data:")
-        if self.VTsuccess == True:
-            print("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
-                  "\nLink to Report: " + str(self.result['permalink']))
-        else:
-            print("Implement VirusTotal API Key for VirusTotal Results")
 
     def createLogFile(self):
         # Write output to log file
@@ -440,6 +441,15 @@ class data():
                         "\nFile Size: " + str(self.fsize) + " Bytes" + \
                         "\nFile Type: " + str(self.ftype) + "\n")
 
+        # Write VT results to Log file
+        hLogFile.write("\n\nVirusTotal Data:")
+
+        if self.VTsuccess:
+            hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
+                           "\nLink to Report: \n" + str(self.result['permalink']))
+        else:
+            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results\n")
+
         # Conditional prints based on file type
         if "PE" in self.ftype:
             hLogFile.write("\n\nPE Data:" + \
@@ -450,7 +460,7 @@ class data():
             if self.isPacked:
                 hLogFile.write("\nThis file is " + self.isPacked + " packed.\n")
             hLogFile.write(self.peImports)
-            if self.isDLL == True:
+            if self.isDLL:
                 try:
                     hLogFile.write("\n\nExports:" + \
                                    "\n" + self.exportData)
@@ -461,15 +471,7 @@ class data():
             hLogFile.write("\n\nELF Data:" + \
                            "\nABI: " + self.abi + \
                            "\nObject File Type: " + self.objtype + \
-                           "\nMachine Type: " + self.machtype)
-
-        # Write VT results to Log file
-        hLogFile.write("\n\nVirusTotal Data:")
-        if self.VTsuccess == True:
-            hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
-                           "\nLink to Report: " + str(self.result['permalink']))
-        else:
-            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results\n\n\n")
+                           "\nMachine Type: " + self.machtype + "\n")
 
         hLogFile.close()
 
@@ -505,7 +507,7 @@ class data():
                            "\n|*Imphash*|" + self.imphash + "|" + \
                            "\n|*Rich Header Hash*|" + self.rHeadHash + "|\n")
             hLogFile.write(self.peImports)
-            if self.isDLL == True:
+            if self.isDLL:
                 try:
                     hLogFile.write("\n\nExports:" + \
                                    "\n" + self.exportData)
@@ -516,14 +518,6 @@ class data():
                            "\nABI: " + self.abi + \
                            "\nObject File Type: " + self.objtype + \
                            "\nMachine Type: " + self.machtype)
-
-        # Write VT results to Log file
-        hLogFile.write("\n\nVirusTotal Data:")
-        if self.VTsuccess == True:
-            hLogFile.write("\nScan Result: " + str(self.result['positives']) + "/" + str(self.result['total']) + \
-                           "\nLink to Report: " + str(self.result['permalink']))
-        else:
-            hLogFile.write("\nImplement VirusTotal API Key for VirusTotal Results\n\n\n")
 
         hLogFile.close()
 
