@@ -212,6 +212,8 @@ class data():
             self.peSections += "\n\tVirtual Address: " + hex(section.VirtualAddress) + "\n"
             self.peSections += "\tVirtual Size: " + hex(section.Misc_VirtualSize) + "\n"
             self.peSections += "\tRaw Size: " + hex(section.SizeOfRawData) + "\n\n"
+            self.peSections += "\MD5: " + get_hash_md5(section) + "\n\n"
+            self.peSections += "\Entropy: " + get_entropy(section) + "\n\n"
 
         #if self.funkySections:
         #    self.peSections += "Odd section names were found:\n"
@@ -494,7 +496,10 @@ class data():
                        "\n|*File Type*|" + str(self.ftype) + "|" + \
                        "\n|*V/T*||" + \
                        "\n|Poss. Attribution*||" + \
-                       "\n|Family||\n")
+                       "\n|Family||\n" + \
+                       "\n|Original Classification||\n" + \
+                       "\n|Regiftable||\n" + \
+                       "\n|Repurposable||\n")
 
         if self.isPacked:
             hLogFile.write("\nThis file is " + self.isPacked + " packed.\n")
