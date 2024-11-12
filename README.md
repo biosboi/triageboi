@@ -23,8 +23,19 @@ features are in the works, Stay tuned.
 
 * Python 3
 * See requirements.txt for required modules
+* For offline use, see offline_requirements.txt
 
 ### Executing program
+
+Python dependencies can be resolved with the command:
+```
+pip install -r requirements.txt
+```
+or
+```
+pip install -r offline-requirements.txt
+```
+If running in offline mode.
 
 Executing triageboi.py on its own will create a log
 in the same directory named triageboi_log.txt.
@@ -42,6 +53,8 @@ For additional options such as:
 
 ## Version History
 
+* 1.1
+    * Allow offline use with attached Python wheels
 * 1.0
     * Major rework
     * Added argparsing
