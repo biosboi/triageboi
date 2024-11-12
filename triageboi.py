@@ -110,24 +110,25 @@ def main() -> None:
         elif os.path.isdir(path):
             # Run against entire directory
             for file in os.listdir(path):
+                file = path + "/" + file
                 if "triageboi" in file:
                     # Skip previously generated log files
                     pass
                 elif os.path.isdir(file):
                     # If file is directory
                     if args.recursive:
-                        parse_paths(file)
+                        file_data_list.extend(parse_paths(file))
                     else:
                         pass
                 else:
                     # Individual file
-                    file_data_list.append(generate_file_data(path + "/" + file))
+                    file_data_list.append(generate_file_data(file))
 
         return file_data_list
 
     for path in args.path:
         # Iterate through every path in args and parse for files/directories
-        triaged_files.extend(file for file in parse_paths(path))
+        triaged_files.extend(parse_paths(path))
 
     # Generate logs based on options
     log_buffer: str = ""
@@ -210,7 +211,7 @@ class PEData(FileData):
         self.pe_compile_time: str = "UNKNOWN"
         self.pe_imphash: str = self._pe.get_imphash().upper()
         self.pe_rich_header_hash: str = self._pe.get_rich_header_hash().upper()
-        self.pe_packer: str = "None Detected"
+        self.pe_Packer: str = "None Detected"
         self.pe_is_dll: bool = False
         self.pe_is_driver: bool = False
         self.pe_imports: dict[str, tuple[str]] = {}
@@ -246,7 +247,9 @@ class PEData(FileData):
         )[1][:-1]
 
         # Imports
-        for _import in self._pe_dict["Imported symbols"]:
+        # Check if imports exist before processing
+        imported_symbols = self._pe_dict.get("Imported symbols", [])
+        for _import in imported_symbols:
             # Skip import descriptor
             _import = _import[1:]
             # Grab DLL name
@@ -267,9 +270,9 @@ class PEData(FileData):
             if _name not in pe_common_sections:
                 self.funky_sections.append(_name)
             # Packer check against section names
-            for sec_name, packer in pe_packer_sections.items():
+            for sec_name, Packer in pe_Packer_sections.items():
                 if _name in sec_name:
-                    self.pe_packer = packer
+                    self.pe_Packer = Packer
                     break
 
         # TLS Data
@@ -384,7 +387,7 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
             f"\nImphash: {file.pe_imphash}"
             f"\nRich Header Hash: {file.pe_rich_header_hash}"
             f"\nCompiled Time: {file.pe_compile_time}"
-            f"\nPacker: {file.pe_packer}"
+            f"\nPacker: {file.pe_Packer}"
         )
 
         if args.verbose:
@@ -523,56 +526,71 @@ pe_characteristics: dict = {
     0x4000: "UP_SYSTEM_ONLY",
     0x8000: "BYTES_REVERSED_HI",
 }
-pe_packer_sections: dict = {
+pe_Packer_sections: dict = {
     # Sourced from: https://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
-    ".aspack": "Aspack packer",
-    ".adata": "Aspack packer/Armadillo packer",
-    "ASPack": "Aspack packer",
-    ".ASPack": "ASPAck Protector",
+    "1\\x00ata": "Molebox Packer",
+    "1\\x00data": "Molebox Packer",
+    "1\\x00TA": "Molebox Packer",
+    "ext": "Molebox Packer",
+    ".alien": "Alienyze",
+    ".aspack": "Aspack Packer",
+    ".adata": "Aspack Packer/Armadillo Packer",
+    "ASPack": "Aspack Packer",
+    ".ASPack": "Aspack Packer",
     ".boom": "The Boomerang List Builder (config+exe xored with a single byte key 0x77)",
+    ".boot": "Themida Packer",
     ".ccg": "CCG Packer (Chinese Packer)",
     ".charmve": "Added by the PIN tool",
     "BitArts": "Crunch 2.0 Packer",
     "DAStub": "DAStub Dragon Armor protector",
-    "!EPack": "Epack packer",
+    "!EPack": "Epack Packer",
     ".ecode": "Built with EPL",
     ".edata": "Built with EPL",
     ".enigma1": "Enigma Protector",
     ".enigma2": "Enigma Protector",
-    "FSG!": "FSG packer (not a section name, but a good identifier)",
+    ".ex_cod": "Expressor Packer",
+    ".packer": "Eronana Packer",
+    "FSG!": "FSG Packer (not a section name, but a good identifier)",
     ".imrsiv": "special section used for applications that can be loaded to OS desktop bands.",
     ".gentee": "Gentee installer",
+    ".jdpack": "JDPack",
     "kkrunchy": "kkrunchy Packer",
     "lz32.dll": "Crinkler",
     ".mackt": "ImpRec-created section",
     ".MaskPE": "MaskPE Packer",
-    "MEW": "MEW packer",
+    "MEW": "MEW Packer",
+    "MEW\\x00F\\x12\\xd2\\xc3": "Mew Packer",
+    "MEW\x00F\x12\xd2\xc3": "Mew Packer",
+    "2\\xd2u\\xdb\\x8a\\x16\\xeb\\xd4": "Mew Packer",
     ".mnbvcx1": "most likely associated with Firseria PUP downloaders",
     ".mnbvcx2": "most likely associated with Firseria PUP downloaders",
     ".MPRESS1": "Mpress Packer",
     ".MPRESS2": "Mpress Packer",
     ".neolite": "Neolite Packer",
     ".neolit": "Neolite Packer",
-    ".nsp1": "NsPack packer",
-    ".nsp0": "NsPack packer",
-    ".nsp2": "NsPack packer",
-    "nsp1": "NsPack packer",
-    "nsp0": "NsPack packer",
-    "nsp2": "NsPack packer",
+    ".nsp1": "NsPack Packer",
+    ".nsp0": "NsPack Packer",
+    ".nsp2": "NsPack Packer",
+    "nsp1": "NsPack Packer",
+    "nsp0": "NsPack Packer",
+    "nsp2": "NsPack Packer",
+    "packerBY": "Bero Packer",
+    "bero^fr": "BeroPacker",
+    ".PACKMAN": "Packman",
     "PEPACK!!": "Pepack",
     "pebundle": "PEBundle Packer",
     "PEBundle": "PEBundle Packer",
-    "PEC2TO": "PECompact packer",
-    "PECompact2": "PECompact packer (not a section name, but a good identifier)",
-    "PEC2": "PECompact packer",
-    "pec": "PECompact packer",
-    "pec1": "PECompact packer",
-    "pec2": "PECompact packer",
-    "pec3": "PECompact packer",
-    "pec4": "PECompact packer",
-    "pec5": "PECompact packer",
-    "pec6": "PECompact packer",
-    "PEC2MO": "PECompact packer",
+    "PEC2TO": "PECompact Packer",
+    "PECompact2": "PECompact Packer (not a section name, but a good identifier)",
+    "PEC2": "PECompact Packer",
+    "pec": "PECompact Packer",
+    "pec1": "PECompact Packer",
+    "pec2": "PECompact Packer",
+    "pec3": "PECompact Packer",
+    "pec4": "PECompact Packer",
+    "pec5": "PECompact Packer",
+    "pec6": "PECompact Packer",
+    "PEC2MO": "PECompact Packer",
     "PELOCKnt": "PELock Protector",
     ".perplex": "Perplex PE-Protector",
     "PESHiELD": "PEShield Packer",
@@ -590,32 +608,37 @@ pe_packer_sections: dict = {
     ".shrink2": "Shrinker",
     ".shrink3": "Shrinker",
     ".spack": "Simple Pack (by bagie)",
-    ".svkp": "SVKP packer",
+    ".svkp": "SVKP Packer",
+    "ta": "FSG Packer",
     "Themida": "Themida Packer",
     ".Themida": "Themida Packer",
+    ".themida": "Themida Packer",
     ".taz": "Some version os PESpin",
     ".tsuarch": "TSULoader",
     ".tsustub": "TSULoader",
     ".packed": "Unknown Packer",
-    ".Upack": "Upack packer",
+    ".Upack": "Upack Packer",
     ".ByDwing": "Upack Packer",
-    "UPX0": "UPX packer",
-    "UPX1": "UPX packer",
-    "UPX2": "UPX packer",
-    "UPX3": "UPX packer",
-    "UPX!": "UPX packer",
+    "PS\\xff\\xd5\\xab\\xeb\\xe7\\xc3": "Upack Packer",
+    "UPX0": "UPX Packer",
+    "UPX1": "UPX Packer",
+    "UPX2": "UPX Packer",
+    "UPX3": "UPX Packer",
+    "UPX!": "UPX Packer",
     ".UPX0": "UPX Packer",
     ".UPX1": "UPX Packer",
     ".UPX2": "UPX Packer",
-    ".vmp0": "VMProtect packer",
-    ".vmp1": "VMProtect packer",
-    ".vmp2": "VMProtect packer",
+    ".vmp0": "VMProtect Packer",
+    ".vmp1": "VMProtect Packer",
+    ".vmp2": "VMProtect Packer",
     "VProtect": "Vprotect Packer",
     ".winapi": "Added by API Override tool",
     "WinLicen": "WinLicense (Themida) Protector",
+    "PS\\xff\\xd5\\xab\\xeb\\xe7\\xc3": "WinUPack Packer",
     "_winzip_": "WinZip Self-Extractor",
     ".WWPACK": "WWPACK Packer",
     ".WWP32": "WWPACK Packer (WWPack32)",
+    "yC": "Yoda Crypter",
     ".yP": "Y0da Protector",
     ".y0da": "Y0da Protector",
 }

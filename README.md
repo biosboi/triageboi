@@ -53,7 +53,10 @@ For additional options such as:
 
 ## Version History
 
-* 1.1
+* 1.0.2
+    * Recursive directory search bugfixes
+    * Additional Packer Identifications
+* 1.0.1
     * Allow offline use with attached Python wheels
 * 1.0
     * Major rework
