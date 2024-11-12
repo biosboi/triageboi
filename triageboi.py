@@ -121,7 +121,7 @@ def main() -> None:
                         pass
                 else:
                     # Individual file
-                    file_data_list.append(generate_file_data(file))
+                    file_data_list.append(generate_file_data(path + "/" + file))
 
         return file_data_list
 
@@ -252,7 +252,11 @@ class PEData(FileData):
             # Grab DLL name
             _api: str = _import[0]["DLL"].decode("utf-8")
             # Assign functions to DLL in dictionary as list
-            self.pe_imports[_api] = [func["Name"].decode("utf-8") for func in _import]
+            self.pe_imports[_api] = [
+                # Handles when there is no name, but an ordinal
+                func.get("Name", func.get("Ordinal", None)).decode("utf-8") if func.get("Name") else None
+                for func in _import
+            ]
 
         # Sections
         self.funky_sections: list = []
