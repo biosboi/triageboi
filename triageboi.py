@@ -90,14 +90,13 @@ def main() -> None:
             with open(file=file, mode="rb") as handle_file:
                 # Generate file information
                 file_type = get_file_type(handle=handle_file)
-                match file_type:
-                    case "PE File":
-                        return PEData(handle=handle_file, path=file, file_type=file_type)
-                    case "ELF File":
-                        return ELFData(handle=handle_file, path=file, file_type=file_type)
-                    case _:
-                        # Default file handler
-                        return FileData(handle=handle_file, path=file, file_type=file_type)
+                if file_type == "PE File":
+                    return PEData(handle=handle_file, path=file, file_type=file_type)
+                elif file_type == "ELF File":
+                    return ELFData(handle=handle_file, path=file, file_type=file_type)
+                else:
+                    # Default file handler
+                    return FileData(handle=handle_file, path=file, file_type=file_type)
         except FileNotFoundError:
             print("[!] File not found: " + file)
 
@@ -373,53 +372,52 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
                 output += (f"\nSuggested Threat Label: {classification}")
 
     # Conditional prints based on file type
-    match file.file_type:
-        case _ if "PE" in file.file_type:
-            # Standard PE Data
-            output += (
-                f"\n\nPE Data:"
-                f"\nMachine Type: {file.pe_mach_type}"
-                f"\nImphash: {file.pe_imphash}"
-                f"\nRich Header Hash: {file.pe_rich_header_hash}"
-                f"\nCompiled Time: {file.pe_compile_time}"
-                f"\nPacker: {file.pe_packer}"
-            )
+    if "PE" in file.file_type:
+        # Standard PE Data
+        output += (
+            f"\n\nPE Data:"
+            f"\nMachine Type: {file.pe_mach_type}"
+            f"\nImphash: {file.pe_imphash}"
+            f"\nRich Header Hash: {file.pe_rich_header_hash}"
+            f"\nCompiled Time: {file.pe_compile_time}"
+            f"\nPacker: {file.pe_packer}"
+        )
 
-            if args.verbose:
-                # Import Data
-                output += ("\n\nImports:")
-                for imp in file.pe_imports.keys():
-                    output += (
-                        f"\n{imp}"
-                    )
+        if args.verbose:
+            # Import Data
+            output += ("\n\nImports:")
+            for imp in file.pe_imports.keys():
+                output += (
+                    f"\n{imp}"
+                )
 
-                # Section Data
-                output += ("\n\nSections:\n")
-                output += "\n".join(file.pe_sections)
+            # Section Data
+            output += ("\n\nSections:\n")
+            output += "\n".join(file.pe_sections)
 
-                # Characteristics
-                output += ("\n\nCharacteristics:\n")
-                output += "\n".join(file.pe_characteristics)
+            # Characteristics
+            output += ("\n\nCharacteristics:\n")
+            output += "\n".join(file.pe_characteristics)
 
-            # DLL Data
-            if file.pe_is_dll:
-                # Export Data
-                output += ("\n\nExports:")
-                for ordinal, export in file.pe_exports.items():
-                    output += (
-                        f"\n#{ordinal}: {export}"
-                    )
+        # DLL Data
+        if file.pe_is_dll:
+            # Export Data
+            output += ("\n\nExports:")
+            for ordinal, export in file.pe_exports.items():
+                output += (
+                    f"\n#{ordinal}: {export}"
+                )
 
-        case _ if "ELF" in file.file_type:
-            # Standard ELF Data
-            output += (
-                f"\n\nELF Data:"
-                f"\nABI: {file.elf_abi}"
-                f"\nObject File Type: {file.elf_obj_type}"
-                f"\nMachine Type: {file.elf_mach_type}\n"
-            )
-        case _:
-            pass
+    elif "ELF" in file.file_type:
+        # Standard ELF Data
+        output += (
+            f"\n\nELF Data:"
+            f"\nABI: {file.elf_abi}"
+            f"\nObject File Type: {file.elf_obj_type}"
+            f"\nMachine Type: {file.elf_mach_type}\n"
+        )
+    else:
+        pass
     return output
 
 
