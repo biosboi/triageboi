@@ -329,7 +329,7 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
     output += (
         f"\n\n{'-' * 65}"
         f"\nTRIAGEBOI Output For File: {file.file_name}"
-        f"\nTRIAGEBOI is Written and Directed by [William (Nathan) Robinson]"
+        f"\nTRIAGEBOI is Written and Directed by biosboi"
         f"\n{'-' * 65}"
         f"\n"
     )
