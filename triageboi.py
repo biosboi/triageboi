@@ -15,6 +15,9 @@ import hashlib
 import os
 import pefile
 import requests
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from asn1crypto import cms
 
 # \/\/INSERT VT API KEY FOR VIRUSTOTAL ACCESS\/\/
 VT_API_KEY: str = ""
@@ -74,7 +77,7 @@ def main() -> None:
         "--verbose",
         action="store_true",
         default=False,
-        help="Increase output verbosity",
+        help="Increase output verbosity including (Increases processing time)",
     )
     args: argparse.Namespace = parser.parse_args()
 
@@ -91,7 +94,7 @@ def main() -> None:
                 # Generate file information
                 file_type = get_file_type(handle=handle_file)
                 if file_type == "PE File":
-                    return PEData(handle=handle_file, path=file, file_type=file_type)
+                    return PEData(handle=handle_file, path=file, file_type=file_type, args=args)
                 elif file_type == "ELF File":
                     return ELFData(handle=handle_file, path=file, file_type=file_type)
                 else:
@@ -202,21 +205,32 @@ class FileData:
 
 class PEData(FileData):
     """"Represents individual file of type PE"""
-    def __init__(self, handle, path, file_type):
+    def __init__(self, handle, path, file_type, args):
         FileData.__init__(self, handle, path, file_type)
-        self._pe: pefile.PE = pefile.PE(name=path)
+        # PE File Parsing
+        if args.verbose:
+            self._pe: pefile.PE = pefile.PE(name=path, fast_load=False)
+        else:
+            self._pe: pefile.PE = pefile.PE(name=path, fast_load=True)
         self._pe_dict: dict = self._pe.dump_dict()
-        self.pe_characteristics: list = []
+        # PE File Information
         self.pe_mach_type: str = pe_mach_types.get(self._pe_dict["FILE_HEADER"]["Machine"]["Value"])
         self.pe_compile_time: str = "UNKNOWN"
-        self.pe_imphash: str = self._pe.get_imphash().upper()
-        self.pe_rich_header_hash: str = self._pe.get_rich_header_hash().upper()
-        self.pe_Packer: str = "None Detected"
         self.pe_is_dll: bool = False
         self.pe_is_driver: bool = False
+        self.pe_characteristics: list = []
+        self.pe_version_info: dict = {}
+        self.pe_certs: list[dict] = []
+        # Hashing Information
+        self.pe_imphash: str = self._pe.get_imphash().upper()
+        self.pe_rich_header_hash: str = self._pe.get_rich_header_hash().upper()
+        # Import/Export Information
         self.pe_imports: dict[str, tuple[str]] = {}
         self.pe_exports: dict[int, str] = {}
+        # PE Section Information
+        self.pe_packer: str = "None Detected"
         self.pe_sections: list = []
+        self.pe_tls: dict = {}
 
         # 32-bit or 64-bit
         if self._pe.PE_TYPE == 0x10B:
@@ -248,8 +262,8 @@ class PEData(FileData):
 
         # Imports
         # Check if imports exist before processing
-        imported_symbols = self._pe_dict.get("Imported symbols", [])
-        for _import in imported_symbols:
+        _imported_symbols: dict = self._pe_dict.get("Imported symbols", [])
+        for _import in _imported_symbols:
             # Skip import descriptor
             _import = _import[1:]
             # Grab DLL name
@@ -257,35 +271,97 @@ class PEData(FileData):
             # Assign functions to DLL in dictionary as list
             self.pe_imports[_api] = [
                 # Handles when there is no name, but an ordinal
-                func.get("Name", func.get("Ordinal", None)).decode("utf-8") if func.get("Name") else None
-                for func in _import
+                func.get("Name", func.get("Ordinal", None)).decode("utf-8")
+                if func.get("Name") else None for func in _import
             ]
+        # Check if delayed imports exist before processing
+        _delay_imported_symbols: dict = self._pe_dict.get("Delay Imported symbols", [])
+        for _import in _delay_imported_symbols:
+            # Skip import descriptor
+            _import = _import[1:]
+            # Grab DLL name
+            _api: str = _import[0]["DLL"].decode("utf-8")
+            # Assign functions to DLL in dictionary as list
+            self.pe_imports[_api] = [
+                # Handles when there is no name, but an ordinal
+                func.get("Name", func.get("Ordinal", None)).decode("utf-8")
+                if func.get("Name") else None for func in _import
+            ]
+
+        # Export Data
+        # Check if exports exist before processing
+        _exported_symbols: dict = self._pe_dict.get("Exported symbols", [])
+        for _export in _exported_symbols:
+            # Skip Export Directory
+            for _export in self._pe_dict["Exported symbols"][1:]:
+                # Check if the name exists
+                if _export["Name"] is not None:
+                    self.pe_exports[_export["Ordinal"]] = _export["Name"].decode("utf-8")
+                else:
+                    # If no name, use only ordinal
+                    self.pe_exports[_export["Ordinal"]] = "<Unnamed Export>"
 
         # Sections
         self.funky_sections: list = []
         for _section in self._pe_dict["PE Sections"]:
-            _name: str = _section["Name"]["Value"].strip("\\x00")
+            # Often section names have null bytes and/or whitespace attached
+            _name: str = _section["Name"]["Value"].strip("\\x00").strip()
             self.pe_sections.append(_name)
             # Rudimentary Funky section check
             if _name not in pe_common_sections:
                 self.funky_sections.append(_name)
-            # Packer check against section names
-            for sec_name, Packer in pe_Packer_sections.items():
-                if _name in sec_name:
-                    self.pe_Packer = Packer
-                    break
+                # Packer check against section names
+                for sec_name, packer in pe_packer_sections.items():
+                    if _name in sec_name:
+                        self.pe_packer = packer
+                        break
 
         # TLS Data
-        # TODO TLS handling
+        _tls_data: dict = self._pe_dict.get("TLS", [])
+        # TODO TLS Data handler
 
         # Cert Data
-        # TODO Cert handling
+        for _entry in self._pe_dict["Directories"]:
+            if _entry["Structure"] == "IMAGE_DIRECTORY_ENTRY_SECURITY":
+                _cert_info: dict = _entry
+                _sigoff: int = _cert_info["VirtualAddress"]["Value"]
+                _sigsize: int = _cert_info["Size"]["Value"]
+                if _sigoff > 0:
+                    # Entry exists
+                    self.handle.seek(_sigoff)
+                    _raw_sig: bytes = self.handle.read(_sigsize)[8:]
+                    # Catch invalid cert blocks
+                    try:
+                        _signature: cms.ContentInfo = cms.ContentInfo.load(encoded_data=_raw_sig)
+                        for _cert in _signature["content"]["certificates"]:
+                            parsed_cert = x509.load_der_x509_certificate(
+                                data=_cert.dump(),
+                                backend=default_backend(),
+                            )
+                            self.pe_certs.append(parsed_cert)
+                    except ValueError:
+                        # Most failures appear to be associated with packers
+                        pass
+                    except TypeError:
+                        # Most failures appear to be associated with packers
+                        pass
+                break
 
-        # DLL Data
-        if self.pe_is_dll:
-            # Skip Export Directory
-            for _export in self._pe_dict["Exported symbols"][1:]:
-                self.pe_exports[_export["Ordinal"]] = _export["Name"].decode("utf-8")
+        # Version Information
+        _version_info: dict = self._pe_dict.get("Version Information", [])
+        if _version_info:
+            # Handles first entry only. Couldn't identify a case where there
+            # were more than one entries, so this should suffice. Could be
+            # safer and handle additional entries in the future.
+            try:
+                for _entry in _version_info[0][2]:
+                    # Searches for valid entry
+                    if isinstance(_entry, dict) and "Length" not in _entry:
+                        self.pe_version_info = _entry
+                        break
+            except IndexError:
+                # String info not found
+                pass
 
 class ELFData(FileData):
     """"Represents individual file of type ELF"""
@@ -384,19 +460,30 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
         output += (
             f"\n\nPE Data:"
             f"\nMachine Type: {file.pe_mach_type}"
-            f"\nImphash: {file.pe_imphash}"
-            f"\nRich Header Hash: {file.pe_rich_header_hash}"
             f"\nCompiled Time: {file.pe_compile_time}"
-            f"\nPacker: {file.pe_Packer}"
+            f"\nPacker: {file.pe_packer}"
         )
 
         if args.verbose:
+            # Import hash and Rich header hash
+            output += (
+                f"\nImphash: {file.pe_imphash}"
+                f"\nRich Header Hash: {file.pe_rich_header_hash}"
+            )
+
             # Import Data
             output += ("\n\nImports:")
             for imp in file.pe_imports.keys():
                 output += (
                     f"\n{imp}"
                 )
+            # Export Data
+            if file.pe_exports:
+                output += ("\n\nExports:")
+                for ordinal, export in file.pe_exports.items():
+                    output += (
+                        f"\n#{ordinal}: {export}"
+                    )
 
             # Section Data
             output += ("\n\nSections:\n")
@@ -406,14 +493,37 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
             output += ("\n\nCharacteristics:\n")
             output += "\n".join(file.pe_characteristics)
 
-        # DLL Data
-        if file.pe_is_dll:
-            # Export Data
-            output += ("\n\nExports:")
-            for ordinal, export in file.pe_exports.items():
-                output += (
-                    f"\n#{ordinal}: {export}"
-                )
+            # Version Information
+            if file.pe_version_info:
+                output += ("\n\nVersion Information:")
+                for key, value in file.pe_version_info.items():
+                    # Check if the key/value is a byte string and decode it if so
+                    key: str = key.decode("utf-8") if isinstance(key, bytes) else key
+                    value: str = value.decode("utf-8") if isinstance(value, bytes) else value
+                    output += f"\n{key}: {value}"
+
+            # Certificate Information
+            if file.pe_certs:
+                output += ("\n\nCertificate Information:")
+                for cert in file.pe_certs:
+                    output += (
+                        f"\n--CERT BEGIN--"
+                        f"\nIssuer: {cert.issuer.rfc4514_string()}"
+                        f"\nSubject: {cert.subject.rfc4514_string()}"
+                        f"\nVersion: {cert.version}"
+                        f"\nInvalid Before: "
+                        f"{cert.not_valid_before_utc.strftime("%m/%d/%y  %H:%M:%S")}"
+                        f"\nInvalid After: "
+                        f"{cert.not_valid_after_utc.strftime("%m/%d/%y  %H:%M:%S")}"
+                        f"\nHash Algorithm: {cert.signature_hash_algorithm.name}"
+                        f"\n--CERT END--"
+                    )
+
+        # Funky Section Names
+        if file.funky_sections:
+            output += ("\n\nUnusual Section Names Found:\n")
+            output += "\n".join(file.funky_sections)
+
 
     elif "ELF" in file.file_type:
         # Standard ELF Data
@@ -526,118 +636,116 @@ pe_characteristics: dict = {
     0x4000: "UP_SYSTEM_ONLY",
     0x8000: "BYTES_REVERSED_HI",
 }
-pe_Packer_sections: dict = {
+pe_packer_sections: dict = {
     # Sourced from: https://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
-    "1\\x00ata": "Molebox Packer",
-    "1\\x00data": "Molebox Packer",
-    "1\\x00TA": "Molebox Packer",
-    "ext": "Molebox Packer",
+    "1\\x00ata": "Molebox",
+    "1\\x00data": "Molebox",
+    "1\\x00TA": "Molebox",
+    "ext": "Molebox",
     ".alien": "Alienyze",
-    ".aspack": "Aspack Packer",
-    ".adata": "Aspack Packer/Armadillo Packer",
-    "ASPack": "Aspack Packer",
-    ".ASPack": "Aspack Packer",
+    ".aspack": "Aspack",
+    ".adata": "Aspack/Armadillo",
+    "ASPack": "Aspack",
+    ".ASPack": "Aspack",
     ".boom": "The Boomerang List Builder (config+exe xored with a single byte key 0x77)",
-    ".boot": "Themida Packer",
-    ".ccg": "CCG Packer (Chinese Packer)",
+    ".boot": "Themida",
+    ".ccg": "CCG (Chinese)",
     ".charmve": "Added by the PIN tool",
-    "BitArts": "Crunch 2.0 Packer",
+    "BitArts": "Crunch 2.0",
     "DAStub": "DAStub Dragon Armor protector",
-    "!EPack": "Epack Packer",
+    "!EPack": "Epack",
     ".ecode": "Built with EPL",
     ".edata": "Built with EPL",
     ".enigma1": "Enigma Protector",
     ".enigma2": "Enigma Protector",
-    ".ex_cod": "Expressor Packer",
-    ".packer": "Eronana Packer",
-    "FSG!": "FSG Packer (not a section name, but a good identifier)",
+    ".ex_cod": "Expressor",
+    ".packer": "Eronana",
+    "FSG!": "FSG (not a section name, but a good identifier)",
     ".imrsiv": "special section used for applications that can be loaded to OS desktop bands.",
     ".gentee": "Gentee installer",
     ".jdpack": "JDPack",
-    "kkrunchy": "kkrunchy Packer",
+    "kkrunchy": "kkrunchy",
     "lz32.dll": "Crinkler",
     ".mackt": "ImpRec-created section",
-    ".MaskPE": "MaskPE Packer",
-    "MEW": "MEW Packer",
-    "MEW\\x00F\\x12\\xd2\\xc3": "Mew Packer",
-    "MEW\x00F\x12\xd2\xc3": "Mew Packer",
-    "2\\xd2u\\xdb\\x8a\\x16\\xeb\\xd4": "Mew Packer",
+    ".MaskPE": "MaskPE",
+    "MEW": "MEW",
+    "MEW\\x00F\\x12\\xd2\\xc3": "Mew",
+    "MEW\x00F\x12\xd2\xc3": "Mew",
+    "2\\xd2u\\xdb\\x8a\\x16\\xeb\\xd4": "Mew",
     ".mnbvcx1": "most likely associated with Firseria PUP downloaders",
     ".mnbvcx2": "most likely associated with Firseria PUP downloaders",
-    ".MPRESS1": "Mpress Packer",
-    ".MPRESS2": "Mpress Packer",
-    ".neolite": "Neolite Packer",
-    ".neolit": "Neolite Packer",
-    ".nsp1": "NsPack Packer",
-    ".nsp0": "NsPack Packer",
-    ".nsp2": "NsPack Packer",
-    "nsp1": "NsPack Packer",
-    "nsp0": "NsPack Packer",
-    "nsp2": "NsPack Packer",
-    "packerBY": "Bero Packer",
+    ".MPRESS1": "Mpress",
+    ".MPRESS2": "Mpress",
+    ".neolite": "Neolite",
+    ".neolit": "Neolite",
+    ".nsp1": "NsPack",
+    ".nsp0": "NsPack",
+    ".nsp2": "NsPack",
+    "nsp1": "NsPack",
+    "nsp0": "NsPack",
+    "nsp2": "NsPack",
+    "packerBY": "Bero",
     "bero^fr": "BeroPacker",
     ".PACKMAN": "Packman",
     "PEPACK!!": "Pepack",
-    "pebundle": "PEBundle Packer",
-    "PEBundle": "PEBundle Packer",
-    "PEC2TO": "PECompact Packer",
-    "PECompact2": "PECompact Packer (not a section name, but a good identifier)",
-    "PEC2": "PECompact Packer",
-    "pec": "PECompact Packer",
-    "pec1": "PECompact Packer",
-    "pec2": "PECompact Packer",
-    "pec3": "PECompact Packer",
-    "pec4": "PECompact Packer",
-    "pec5": "PECompact Packer",
-    "pec6": "PECompact Packer",
-    "PEC2MO": "PECompact Packer",
+    "pebundle": "PEBundle",
+    "PEBundle": "PEBundle",
+    "PEC2TO": "PECompact",
+    "PEC2": "PECompact",
+    "pec": "PECompact",
+    "pec1": "PECompact",
+    "pec2": "PECompact",
+    "pec3": "PECompact",
+    "pec4": "PECompact",
+    "pec5": "PECompact",
+    "pec6": "PECompact",
+    "PEC2MO": "PECompact",
     "PELOCKnt": "PELock Protector",
     ".perplex": "Perplex PE-Protector",
-    "PESHiELD": "PEShield Packer",
-    ".petite": "Petite Packer",
+    "PESHiELD": "PEShield",
+    ".petite": "Petite",
     ".pinclie": "Added by the PIN tool",
-    "ProCrypt": "ProCrypt Packer",
+    "ProCrypt": "ProCrypt",
     ".profile": "NightHawk C2 framework (by MDSec)",
-    ".RLPack": "RLPack Packer (second section)",
+    ".RLPack": "RLPack (second section)",
     ".rmnet": "Ramnit virus marker",
-    "RCryptor": "RPCrypt Packer",
-    ".RPCrypt": "RPCrypt Packer",
-    ".seau": "SeauSFX Packer",
+    "RCryptor": "RPCrypt",
+    ".RPCrypt": "RPCrypt",
+    ".seau": "SeauSFX",
     ".sforce3": "StarForce Protection",
     ".shrink1": "Shrinker",
     ".shrink2": "Shrinker",
     ".shrink3": "Shrinker",
     ".spack": "Simple Pack (by bagie)",
-    ".svkp": "SVKP Packer",
-    "ta": "FSG Packer",
-    "Themida": "Themida Packer",
-    ".Themida": "Themida Packer",
-    ".themida": "Themida Packer",
+    ".svkp": "SVKP",
+    "ta": "FSG",
+    "Themida": "Themida",
+    ".Themida": "Themida",
+    ".themida": "Themida",
     ".taz": "Some version os PESpin",
     ".tsuarch": "TSULoader",
     ".tsustub": "TSULoader",
-    ".packed": "Unknown Packer",
-    ".Upack": "Upack Packer",
-    ".ByDwing": "Upack Packer",
-    "PS\\xff\\xd5\\xab\\xeb\\xe7\\xc3": "Upack Packer",
-    "UPX0": "UPX Packer",
-    "UPX1": "UPX Packer",
-    "UPX2": "UPX Packer",
-    "UPX3": "UPX Packer",
-    "UPX!": "UPX Packer",
-    ".UPX0": "UPX Packer",
-    ".UPX1": "UPX Packer",
-    ".UPX2": "UPX Packer",
-    ".vmp0": "VMProtect Packer",
-    ".vmp1": "VMProtect Packer",
-    ".vmp2": "VMProtect Packer",
-    "VProtect": "Vprotect Packer",
+    ".packed": "Unknown",
+    ".Upack": "Upack",
+    ".ByDwing": "Upack",
+    "PS\\xff\\xd5\\xab\\xeb\\xe7\\xc3": "Upack OR WinUPack",
+    "UPX0": "UPX",
+    "UPX1": "UPX",
+    "UPX2": "UPX",
+    "UPX3": "UPX",
+    "UPX!": "UPX",
+    ".UPX0": "UPX",
+    ".UPX1": "UPX",
+    ".UPX2": "UPX",
+    ".vmp0": "VMProtect",
+    ".vmp1": "VMProtect",
+    ".vmp2": "VMProtect",
+    "VProtect": "Vprotect",
     ".winapi": "Added by API Override tool",
     "WinLicen": "WinLicense (Themida) Protector",
-    "PS\\xff\\xd5\\xab\\xeb\\xe7\\xc3": "WinUPack Packer",
     "_winzip_": "WinZip Self-Extractor",
-    ".WWPACK": "WWPACK Packer",
-    ".WWP32": "WWPACK Packer (WWPack32)",
+    ".WWPACK": "WWPACK",
+    ".WWP32": "WWPACK (WWPack32)",
     "yC": "Yoda Crypter",
     ".yP": "Y0da Protector",
     ".y0da": "Y0da Protector",

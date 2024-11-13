@@ -53,16 +53,23 @@ For additional options such as:
 
 ## Version History
 
-* 1.0.2
+* 1.2.0
+    * PE File Version Information is now parsed
+    * PE File Certificate Information is now parsed
+    * Additional cleanups for readability
+    * Additional error handling for outlier data
+    * Unusual Section Names now output to log
+    * Running non-verbose will now significantly reduce processing time
+* 1.1.1
     * Recursive directory search bugfixes
     * Additional Packer Identifications
-* 1.0.1
+* 1.1.0
     * Allow offline use with attached Python wheels
-* 1.0
+* 1.0.0
     * Major rework
     * Added argparsing
     * Better error handling
     * Additional VirusTotal parsing
     * Many many bugfixes
-* 0.1
+* 0.1.0
     * Initial Release
