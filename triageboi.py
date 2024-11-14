@@ -28,15 +28,15 @@ Globals are listed at the end of the file to improve
 readability because the dictionaries are quite large
 """
 
+
 def main() -> None:
     """Initiate tool"""
     # Set up argparse
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="triageboi",
         description="TRIAGEBOI is written and directed by biosboi.",
-        epilog=
-        """[I] By default, triageboi will create a single log for
-        every file in the directory it's located in."""
+        epilog="""[I] By default, triageboi will create a single log for
+        every file in the directory it's located in.""",
     )
     parser.add_argument(
         "path",
@@ -94,7 +94,9 @@ def main() -> None:
                 # Generate file information
                 file_type = get_file_type(handle=handle_file)
                 if file_type == "PE File":
-                    return PEData(handle=handle_file, path=file, file_type=file_type, args=args)
+                    return PEData(
+                        handle=handle_file, path=file, file_type=file_type, args=args
+                    )
                 elif file_type == "ELF File":
                     return ELFData(handle=handle_file, path=file, file_type=file_type)
                 else:
@@ -162,8 +164,10 @@ def get_file_type(handle) -> str:
             return value
     return "Unknown File Type"
 
+
 class FileData:
-    """"Represents individual file"""
+    """Represents individual file"""
+
     def __init__(self, handle, path, file_type):
         """Init file information"""
         self.path: str = path
@@ -203,8 +207,10 @@ class FileData:
 
         return _hash_dict
 
+
 class PEData(FileData):
-    """"Represents individual file of type PE"""
+    """ "Represents individual file of type PE"""
+
     def __init__(self, handle, path, file_type, args):
         FileData.__init__(self, handle, path, file_type)
         # PE File Parsing
@@ -214,7 +220,9 @@ class PEData(FileData):
             self._pe: pefile.PE = pefile.PE(name=path, fast_load=True)
         self._pe_dict: dict = self._pe.dump_dict()
         # PE File Information
-        self.pe_mach_type: str = pe_mach_types.get(self._pe_dict["FILE_HEADER"]["Machine"]["Value"])
+        self.pe_mach_type: str = pe_mach_types.get(
+            self._pe_dict["FILE_HEADER"]["Machine"]["Value"]
+        )
         self.pe_compile_time: str = "UNKNOWN"
         self.pe_is_dll: bool = False
         self.pe_is_driver: bool = False
@@ -249,16 +257,19 @@ class PEData(FileData):
             self.pe_is_driver = True
 
         # Characteristics
-        _characteristics_val: int = self._pe_dict["FILE_HEADER"]["Characteristics"]["Value"]
+        _characteristics_val: int = self._pe_dict["FILE_HEADER"]["Characteristics"][
+            "Value"
+        ]
         self.pe_characteristics = [
-            _characteristic for _bit_value, _characteristic in pe_characteristics.items()
+            _characteristic
+            for _bit_value, _characteristic in pe_characteristics.items()
             if _characteristics_val & _bit_value
         ]
 
         # Compile Time
-        self.pe_compile_time = self._pe_dict["FILE_HEADER"]["TimeDateStamp"]["Value"].split(
-            "["
-        )[1][:-1]
+        self.pe_compile_time = self._pe_dict["FILE_HEADER"]["TimeDateStamp"][
+            "Value"
+        ].split("[")[1][:-1]
 
         # Imports
         # Check if imports exist before processing
@@ -271,8 +282,12 @@ class PEData(FileData):
             # Assign functions to DLL in dictionary as list
             self.pe_imports[_api] = [
                 # Handles when there is no name, but an ordinal
-                func.get("Name", func.get("Ordinal", None)).decode("utf-8")
-                if func.get("Name") else None for func in _import
+                (
+                    func.get("Name", func.get("Ordinal", None)).decode("utf-8")
+                    if func.get("Name")
+                    else None
+                )
+                for func in _import
             ]
         # Check if delayed imports exist before processing
         _delay_imported_symbols: dict = self._pe_dict.get("Delay Imported symbols", [])
@@ -284,8 +299,12 @@ class PEData(FileData):
             # Assign functions to DLL in dictionary as list
             self.pe_imports[_api] = [
                 # Handles when there is no name, but an ordinal
-                func.get("Name", func.get("Ordinal", None)).decode("utf-8")
-                if func.get("Name") else None for func in _import
+                (
+                    func.get("Name", func.get("Ordinal", None)).decode("utf-8")
+                    if func.get("Name")
+                    else None
+                )
+                for func in _import
             ]
 
         # Export Data
@@ -296,7 +315,9 @@ class PEData(FileData):
             for _export in self._pe_dict["Exported symbols"][1:]:
                 # Check if the name exists
                 if _export["Name"] is not None:
-                    self.pe_exports[_export["Ordinal"]] = _export["Name"].decode("utf-8")
+                    self.pe_exports[_export["Ordinal"]] = _export["Name"].decode(
+                        "utf-8"
+                    )
                 else:
                     # If no name, use only ordinal
                     self.pe_exports[_export["Ordinal"]] = "<Unnamed Export>"
@@ -332,7 +353,9 @@ class PEData(FileData):
                     _raw_sig: bytes = self.handle.read(_sigsize)[8:]
                     # Catch invalid cert blocks
                     try:
-                        _signature: cms.ContentInfo = cms.ContentInfo.load(encoded_data=_raw_sig)
+                        _signature: cms.ContentInfo = cms.ContentInfo.load(
+                            encoded_data=_raw_sig
+                        )
                         for _cert in _signature["content"]["certificates"]:
                             parsed_cert = x509.load_der_x509_certificate(
                                 data=_cert.dump(),
@@ -363,12 +386,14 @@ class PEData(FileData):
                 # String info not found
                 pass
 
+
 class ELFData(FileData):
-    """"Represents individual file of type ELF"""
+    """Represents individual file of type ELF"""
+
     def __init__(self, handle, path, file_type):
         FileData.__init__(self, handle, path, file_type)
 
-         # Grab Header
+        # Grab Header
         self.handle.seek(0)
         _elf_header = self.handle.read(0x14)
 
@@ -382,10 +407,12 @@ class ELFData(FileData):
         elif _elf_header[0x4] == 0x2:
             self.file_type += " - 64-bit"
 
-class VirusTotal():
+
+class VirusTotal:
     """VirusTotal Controller"""
+
     def __init__(self, file_hash: str):
-        self.headers = {"accept": "application/json","X-Apikey": VT_API_KEY}
+        self.headers = {"accept": "application/json", "X-Apikey": VT_API_KEY}
         self.url: str = "https://www.virustotal.com/api/v3/"
         self.file_hash: str = file_hash
         self.entries: list[dict] = []
@@ -431,12 +458,16 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
     # Grab VT results
     if args.virustotal:
         if not VT_API_KEY:
-            output += ("\nVirusTotal API key not found. Please input API key to triageboi.py.")
+            output += (
+                "\nVirusTotal API key not found. Please input API key to triageboi.py."
+            )
         for entry in file.vt_result.entries:
             attr = entry["attributes"]
             classification: str = None
             try:
-                classification = attr["popular_threat_classification"]["suggested_threat_label"]
+                classification = attr["popular_threat_classification"][
+                    "suggested_threat_label"
+                ]
             except KeyError:
                 pass
             output += (
@@ -452,7 +483,7 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
                 f"\nOther Names: {[name for name in attr["names"]]}"
             )
             if classification:
-                output += (f"\nSuggested Threat Label: {classification}")
+                output += f"\nSuggested Threat Label: {classification}"
 
     # Conditional prints based on file type
     if "PE" in file.file_type:
@@ -472,39 +503,37 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
             )
 
             # Import Data
-            output += ("\n\nImports:")
+            output += "\n\nImports:"
             for imp in file.pe_imports.keys():
-                output += (
-                    f"\n{imp}"
-                )
+                output += f"\n{imp}"
             # Export Data
             if file.pe_exports:
-                output += ("\n\nExports:")
+                output += "\n\nExports:"
                 for ordinal, export in file.pe_exports.items():
-                    output += (
-                        f"\n#{ordinal}: {export}"
-                    )
+                    output += f"\n#{ordinal}: {export}"
 
             # Section Data
-            output += ("\n\nSections:\n")
+            output += "\n\nSections:\n"
             output += "\n".join(file.pe_sections)
 
             # Characteristics
-            output += ("\n\nCharacteristics:\n")
+            output += "\n\nCharacteristics:\n"
             output += "\n".join(file.pe_characteristics)
 
             # Version Information
             if file.pe_version_info:
-                output += ("\n\nVersion Information:")
+                output += "\n\nVersion Information:"
                 for key, value in file.pe_version_info.items():
                     # Check if the key/value is a byte string and decode it if so
                     key: str = key.decode("utf-8") if isinstance(key, bytes) else key
-                    value: str = value.decode("utf-8") if isinstance(value, bytes) else value
+                    value: str = (
+                        value.decode("utf-8") if isinstance(value, bytes) else value
+                    )
                     output += f"\n{key}: {value}"
 
             # Certificate Information
             if file.pe_certs:
-                output += ("\n\nCertificate Information:")
+                output += "\n\nCertificate Information:"
                 for cert in file.pe_certs:
                     output += (
                         f"\n--CERT BEGIN--"
@@ -521,9 +550,8 @@ def read_file_data(file: FileData, args: argparse.Namespace) -> str:
 
         # Funky Section Names
         if file.funky_sections:
-            output += ("\n\nUnusual Section Names Found:\n")
+            output += "\n\nUnusual Section Names Found:\n"
             output += "\n".join(file.funky_sections)
-
 
     elif "ELF" in file.file_type:
         # Standard ELF Data
@@ -543,7 +571,7 @@ def generate_log(file_name: str, log_output: str) -> None:
     try:
         # Generate log for single file
         with open(file=file_name, mode="wb") as handle_file:
-            handle_file.write(log_output.encode('utf-8'))
+            handle_file.write(log_output.encode("utf-8"))
     except IOError:
         print(f"[!] Unable to create log file for: {file_name}.")
     except TypeError:
