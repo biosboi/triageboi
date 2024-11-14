@@ -53,6 +53,9 @@ For additional options such as:
 
 ## Version History
 
+* 1.2.1
+    * Additional error handling and outlier detection
+    * Formatting updates
 * 1.2.0
     * PE File Version Information is now parsed
     * PE File Certificate Information is now parsed
