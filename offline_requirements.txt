@@ -1,7 +1,0 @@
-./wheels/asn1crypto-1.5.1-py2.py3-none-any.whl
-./wheels/certifi-2024.8.30-py3-none-any.whl
-./wheels/charset_normalizer-3.4.0-py3-none-any.whl
-./wheels/idna-3.10-py3-none-any.whl
-./wheels/pefile-2024.8.26-py3-none-any.whl
-./wheels/pycparser-2.22-py3-none-any.whl
-./wheels/requests-2.32.3-py3-none-any.whl

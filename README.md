@@ -1,12 +1,12 @@
 # TRIAGEBOI
 
-Just another Python triage tool. 
-The main goal is to collect all required metadata into 
+Just another Python triage tool.
+The main goal is to collect all required metadata into
 one easily copyable log format for one or many files.
 
 ## Description
 
-Triageboi is a reverse engineering tool designed to 
+Triageboi is a reverse engineering tool designed to
 decrease initial triage time by collecting multiple
 simple tasks into one easy to use tool. The project
 began in 2020 as a small script to consolidate file
@@ -23,7 +23,6 @@ features are in the works, Stay tuned.
 
 * Python 3
 * See requirements.txt for required modules
-* For offline use, see offline_requirements.txt
 
 ### Executing program
 
@@ -31,11 +30,6 @@ Python dependencies can be resolved with the command:
 ```
 pip install -r requirements.txt
 ```
-or
-```
-pip install -r offline-requirements.txt
-```
-If running in offline mode.
 
 Executing triageboi.py on its own will create a log
 in the same directory named triageboi_log.txt.
