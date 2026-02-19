@@ -47,6 +47,11 @@ For additional options such as:
 
 ## Version History
 
+* 2.0.0
+   * Reworked file type detection using pyfsig
+   * Added ELF parsing with pyelftools
+   * Many bugfixes
+   * Cleaner code throughout
 * 1.2.1
     * Additional error handling and outlier detection
     * Formatting updates
