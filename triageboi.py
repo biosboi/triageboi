@@ -6,13 +6,13 @@ began in 2020 as a small script to consolidate file
 data from multiple sources into one text file ready
 for copying to any reporting template. Triageboi is
 designed to be modular so analysts can decide which
-types of data from files is pertinent to them. More
-features are in the works, Stay tuned.
+types of data from files is pertinent to them.
 """
 
 # \/\/INSERT VT API KEY FOR VIRUSTOTAL ACCESS\/\/
 VT_API_KEY: str = ""
 # /\/\INSERT VT API KEY FOR VIRUSTOTAL ACCESS/\/\
+
 
 # --- BEGIN IMPORTS ---
 
@@ -33,33 +33,30 @@ from elftools.common.exceptions import ELFError
 # --- END IMPORTS ---
 
 
-"""
-Globals are listed at the end of the script to improve
-readability because the dictionaries are quite large
-"""
-
 # --- BEGIN CLASSES ---
+
 
 class FileData:
     """Represents individual file"""
 
     def __init__(self, handle, path: str, file_type: tuple[str, str] | None):
-        """Init file information"""
-        self.bitness: str = "None"
+        """Standard file information"""
+        self.bitness: str = "Unknown"
         self.path: str = path
         self.name: str = os.path.basename(self.path)
         self.handle = handle
         self.size: int = os.path.getsize(self.path)
         self.hash: dict[str, str] = self._hash_file()
-        self.vt_result: VirusTotal | None = None
+        self.vt_result: VirusTotalData | None = None
         self.type: str = "Unknown"
         self.type_description: str = "Unknown"
         if file_type:
+            # file_type is provided as (type,description) tuple
             self.type = file_type[0]
             self.type_description = file_type[1]
 
-    def _hash_file(self) -> dict:
-        """Produce MD5, SHA1, and SHA256 hashes. Return as dictionary."""
+    def _hash_file(self) -> dict[str, str]:
+        """Produce MD5, and SHA256 hashes. Return as dictionary."""
         _hash_dict: dict[str, str] = {}
 
         # MD5
@@ -67,21 +64,21 @@ class FileData:
         _md5 = hashlib.md5()
         _buf = self.handle.read()
         _md5.update(_buf)
-        _hash_dict['MD5'] = _md5.hexdigest().upper()
+        _hash_dict["MD5"] = _md5.hexdigest().upper()
 
         # SHA-1
-        #self.handle.seek(0)
-        #_sha1 = hashlib.sha1()
-        #_buf = self.handle.read()
-        #_sha1.update(_buf)
-        #_hash_dict['SHA1'] = _sha1.hexdigest().upper()
+        # self.handle.seek(0)
+        # _sha1 = hashlib.sha1()
+        # _buf = self.handle.read()
+        # _sha1.update(_buf)
+        # _hash_dict['SHA1'] = _sha1.hexdigest().upper()
 
         # SHA-256
         self.handle.seek(0)
         _sha256 = hashlib.sha256()
         _buf = self.handle.read()
         _sha256.update(_buf)
-        _hash_dict['SHA256'] = _sha256.hexdigest().upper()
+        _hash_dict["SHA256"] = _sha256.hexdigest().upper()
 
         return _hash_dict
 
@@ -92,29 +89,31 @@ class PEData(FileData):
     def __init__(self, handle, path: str, file_type: tuple[str, str], verbose: bool):
         FileData.__init__(self, handle, path, file_type)
         # PE File Information
-        self.pe_mach_type: str | None = "UNKNOWN"
-        self.pe_compile_time: str = "UNKNOWN"
+        self.pe_mach_type: str = "Unknown"
+        self.pe_compile_time: str = "Unknown"
         self.pe_is_dll: bool = False
         self.pe_is_driver: bool = False
         self.pe_characteristics: list = []
         self.pe_version_info: dict = {}
         self.pe_certs: list[dict] = []
         # Additional Hashes Information
-        self.pe_imphash: str = "UNKNOWN"
-        self.pe_rich_header_hash: str = "UNKNOWN"
+        self.pe_imphash: str = "Unknown"
+        self.pe_rich_header_hash: str = "Unknown"
         # Import/Export Information
         self.pe_imports: dict[str, set[str]] = {}
         self.pe_exports: dict[int, str] = {}
         # PE Section Information
         self.pe_packers: set[str] = set()
-        self.pe_sections: list = []
+        self.pe_sections: list[str] = []
         self.pe_tls: dict = {}
-        self.funky_sections: list = []
+        self.funky_sections: list[str] = []
 
         self._pe: pefile.PE | None = None
         self._pe_dict: dict | None = None
 
-        ### Pefile Parsing
+        # ---------------------------- #
+        # Pefile Parsing
+        # ---------------------------- #
         try:
             if verbose:
                 self._pe = pefile.PE(name=path, fast_load=False)
@@ -123,34 +122,44 @@ class PEData(FileData):
 
             self._pe_dict = self._pe.dump_dict()
         except pefile.PEFormatError:
-            print(f"[!] {self.name} is not a valid PE file.")
+            print(f"[EE] {self.name} is not a valid PE file.")
             return
 
-        ### Machine Type
+        # ---------------------------- #
+        # Machine Type
+        # ---------------------------- #
         self.pe_mach_type = pe_mach_types.get(
-            self._pe_dict['FILE_HEADER']['Machine']['Value']
+            self._pe_dict["FILE_HEADER"]["Machine"]["Value"]
         )
 
-        ### Additional Hashes
+        # ---------------------------- #
+        # Additional Hashes
+        # ---------------------------- #
         self.pe_imphash = self._pe.get_imphash().upper()
         self.pe_rich_header_hash = str(self._pe.get_rich_header_hash()).upper()
 
-        ### 32-bit or 64-bit
+        # ---------------------------- #
+        # Bitness
+        # ---------------------------- #
         if self._pe.PE_TYPE == 0x10B:
             self.bitness = "32"
         elif self._pe.PE_TYPE == 0x20B:
             self.bitness = "64"
         else:
-            self.bitness = "UNKNOWN"
+            self.bitness = "Unknown"
 
-        ### PE check for library or driver
+        # ---------------------------- #
+        # Library or Driver
+        # ---------------------------- #
         if self._pe.is_dll():
             self.pe_is_dll = True
         if self._pe.is_driver():
             self.pe_is_driver = True
 
-        ### Characteristics
-        _characteristics_val: int = self._pe_dict['FILE_HEADER']['Characteristics'][
+        # ---------------------------- #
+        # Characteristics
+        # ---------------------------- #
+        _characteristics_val: int = self._pe_dict["FILE_HEADER"]["Characteristics"][
             "Value"
         ]
         self.pe_characteristics = [
@@ -159,91 +168,111 @@ class PEData(FileData):
             if _characteristics_val & _bit_value
         ]
 
-        ### Compile Time
-        self.pe_compile_time = self._pe_dict['FILE_HEADER']['TimeDateStamp'][
+        # ---------------------------- #
+        # Compile Time
+        # ---------------------------- #
+        self.pe_compile_time = self._pe_dict["FILE_HEADER"]["TimeDateStamp"][
             "Value"
-        ].split('[')[1][:-1]
+        ].split("[")[1][:-1]
 
-        ### Imports
+        # ---------------------------- #
+        # Imports
+        # ---------------------------- #
         _api: str
-        # Check if imports exist before processing
         _imported_symbols: dict = self._pe_dict.get("Imported symbols", [])
+
         for _import in _imported_symbols:
             # Skip import descriptor
             _import = _import[1:]
             # Grab DLL name
-            _dll_info = _import[0]['DLL']
+            _dll_info = _import[0]["DLL"]
             _api = _dll_info.decode("utf-8") if _dll_info else "Unknown DLL"
             # Assign functions to DLL in dictionary as list
             self.pe_imports[_api] = {
-                # Handles when there is no name, but an ordinal
-                _func.get("Name", "").decode("utf-8") if _func.get("Name")
-                else _func.get("Ordinal")
+                # Handles when there is an ordinal, but no name
+                (
+                    _func.get("Name", "").decode("utf-8")
+                    if _func.get("Name")
+                    else _func.get("Ordinal")
+                )
                 for _func in _import
             }
-        ### Delayed Imports
-        # Check if delayed imports exist before processing
+
+        # ---------------------------- #
+        # Delayed Imports
+        # ---------------------------- #
         _delay_imported_symbols: dict = self._pe_dict.get("Delay Imported symbols", [])
+
         for _import in _delay_imported_symbols:
             # Skip import descriptor
             _import = _import[1:]
             # Grab DLL name
-            _dll_info = _import[0]['DLL']
+            _dll_info = _import[0]["DLL"]
             _api = _dll_info.decode("utf-8") if _dll_info else "Unknown DLL"
             # Assign functions to DLL in dictionary as list
             self.pe_imports[_api] = {
                 # Handles when there is no name, but an ordinal
-                    _func.get("Name", "").decode("utf-8") if _func.get("Name")
+                (
+                    _func.get("Name", "").decode("utf-8")
+                    if _func.get("Name")
                     else _func.get("Ordinal")
-                    for _func in _import
+                )
+                for _func in _import
             }
 
-        ### Export Data
-        # Check if exports exist before processing
+        # ---------------------------- #
+        # Export Data
+        # ---------------------------- #
         _exported_symbols: dict = self._pe_dict.get("Exported symbols", [])
+
         # Skip Export Directory
         for _export in _exported_symbols[1:]:
             # Check if the name exists
-            if _export['Name'] is not None:
-                self.pe_exports[_export['Ordinal']] = _export['Name'].decode(
-                    "utf-8"
-                )
+            if _export["Name"] is not None:
+                self.pe_exports[_export["Ordinal"]] = _export["Name"].decode("utf-8")
             else:
                 # If no name, use only ordinal
-                self.pe_exports[_export['Ordinal']] = "<Unnamed Export>"
+                self.pe_exports[_export["Ordinal"]] = "<Unnamed Export>"
         # Sort by ordinal
         self.pe_exports = dict(sorted(self.pe_exports.items()))
 
-        ### Sections
-        for _section in self._pe_dict['PE Sections']:
-            # Often section names have null bytes and/or whitespace attached
-            _name: str = _section['Name']['Value'].strip("\\x00").strip()
+        # ---------------------------- #
+        # Sections
+        # ---------------------------- #
+        for _section in self._pe_dict["PE Sections"]:
+            # Sometimes section names have null bytes and/or whitespace attached
+            _name: str = _section["Name"]["Value"].strip("\\x00").strip()
             self.pe_sections.append(_name)
-            # Rudimentary Funky section check
+
+            # Funky section check
+            # Based on standard section name list, find outliers
             if _name not in pe_common_sections:
                 self.funky_sections.append(_name)
+                # Funky section names sometimes indicate a packer is present
                 # Packer check against section names
                 for packer, sec_names in pe_packer_sections.items():
                     if _name in sec_names:
                         self.pe_packers.add(packer)
                         break
 
-        ### Directory Parser
-        for _entry in self._pe_dict['Directories']:
+        # ---------------------------- #
+        # Directory Parser
+        # ---------------------------- #
+        for _entry in self._pe_dict["Directories"]:
             self.handle.seek(0)
-            _sigoff: int = _entry['VirtualAddress']['Value']
-            _sigsize: int = _entry['Size']['Value']
+            _sigoff: int = _entry["VirtualAddress"]["Value"]
+            _sigsize: int = _entry["Size"]["Value"]
             _raw_sig: bytes
 
             ## TLS Data
-            if _entry['Structure'] == "IMAGE_DIRECTORY_ENTRY_TLS":
+            if _entry["Structure"] == "IMAGE_DIRECTORY_ENTRY_TLS":
                 if _sigoff > 0:
                     # Entry exists
                     _raw_sig = self.handle.read(_sigsize)[8:]
                 # TODO TLS Data handler
 
             ## Cert Data
-            if _entry['Structure'] == "IMAGE_DIRECTORY_ENTRY_SECURITY":
+            if _entry["Structure"] == "IMAGE_DIRECTORY_ENTRY_SECURITY":
                 if _sigoff > 0:
                     # Entry exists
                     self.handle.seek(_sigoff)
@@ -253,7 +282,7 @@ class PEData(FileData):
                         _signature: cms.ContentInfo = cms.ContentInfo.load(
                             encoded_data=_raw_sig
                         )
-                        for _cert in _signature['content']['certificates']:
+                        for _cert in _signature["content"]["certificates"]:
                             parsed_cert = x509.load_der_x509_certificate(
                                 data=_cert.dump(),
                                 backend=default_backend(),
@@ -266,7 +295,9 @@ class PEData(FileData):
                         # Most failures appear to be associated with packers
                         pass
 
-        ### Version Information
+        # ---------------------------- #
+        # Version Information
+        # ---------------------------- #
         _version_info: dict = self._pe_dict.get("Version Information", [])
         if _version_info:
             # Handles first entry only. Couldn't identify a case where there
@@ -276,7 +307,7 @@ class PEData(FileData):
                 for _entry in _version_info:
                     if type(_entry):
                         # Potentially better way to handle entries
-                        #TODO
+                        # TODO
                         ...
                     # Searches for valid entry
                     if isinstance(_entry, dict) and "Length" not in _entry:
@@ -297,38 +328,50 @@ class ELFData(FileData):
         _elf_header: bytes = self.handle.read(0x14)
         self.elf_abi: str = elf_abi_types.get(_elf_header[0x7])
         self.elf_obj_type: str = elf_obj_types.get(_elf_header[0x10])
-        self.elf_mach_size: str = "UNKNOWN"
-        self.elf_mach_type: str = "UNKNOWN"
+        self.elf_mach_type: str = "Unknown"
 
-        ### Generate ELFFile object
+        # ---------------------------- #
+        # Generate ELFFile object
+        # ---------------------------- #
         try:
             self._elf: ELFFile = ELFFile(handle)
-
-            self.elf_mach_size = str(self._elf.elfclass)
-            self.elf_mach_type = self._elf.get_machine_arch()
-
-            _sections: list[dict] = []
-            _segments: list[dict] = []
-            _sec: dict = {}
-            _seg: dict = {}
-
-            for i in self._elf.iter_sections():
-                _sec = dict(i.header)
-                _sec["name"] = i.name if i.name else "None"
-                _sections.append(_sec)
-            for i in self._elf.iter_segments():
-                _seg = dict(i.header)
-                _segments.append(_seg)
         except ELFError as e:
-            print(f"[!] {self.name} is not a valid ELF file: {e}")
+            print(f"[EE] {self.name} is not a valid ELF file: {e}")
             return
         except Exception as e:
-            print(f"[!] {self.name} exception occured: {e}")
+            print(f"[EE] {self.name} exception occured: {e}")
             return
 
+        # ---------------------------- #
+        # Machine Type
+        # ---------------------------- #
+        self.bitness = str(self._elf.elfclass)
+        self.elf_mach_type = self._elf.get_machine_arch()
 
-class VirusTotal:
-    """VirusTotal Controller"""
+        # ---------------------------- #
+        # Sections
+        # ---------------------------- #
+        _sections: list[dict] = []
+        _sec: dict = {}
+
+        for i in self._elf.iter_sections():
+            _sec = dict(i.header)
+            _sec["name"] = i.name if i.name else "None"
+            _sections.append(_sec)
+
+        # ---------------------------- #
+        # Segments
+        # ---------------------------- #
+        _segments: list[dict] = []
+        _seg: dict = {}
+
+        for i in self._elf.iter_segments():
+            _seg = dict(i.header)
+            _segments.append(_seg)
+
+
+class VirusTotalData:
+    """VirusTotal Processing"""
 
     def __init__(self, file_hash: str):
         self.headers = {"accept": "application/json", "X-Apikey": VT_API_KEY}
@@ -338,11 +381,11 @@ class VirusTotal:
 
     def check_hash(self):
         """Send hash to VirusTotal for analysis"""
-        _url = self.url + "search?query=" + self.hash
+        _url: str = self.url + "search?query=" + self.hash
         _response = requests.get(_url, headers=self.headers, timeout=10)
         _result = _response.json()
-        if _response.status_code == 200 and len(_result['data']) > 0:
-            for entry in _result['data']:
+        if _response.status_code == 200 and len(_result["data"]) > 0:
+            for entry in _result["data"]:
                 self.entries.append(entry)
         else:
             pass
@@ -360,40 +403,37 @@ def generate_file_data(file: str, options) -> FileData | None:
     file_type: tuple = ()
 
     try:
-        # Run against single file
         with open(file=file, mode="rb") as opened_file:
             # Generate file information
             poss_types = get_file_type(handle=opened_file)
 
             if len(poss_types) != 1:
-                # Default file handler using multiple file types
-                return FileData(
-                    handle=opened_file, path=file, file_type=None
-                )
+                # Default file handler multiple file types are identified
+                return FileData(handle=opened_file, path=file, file_type=None)
             else:
+                # Only one type identified, set as primary
                 file_type = poss_types[0]
 
             # Match display string
             match file_type[0]:
                 case "MZ":
                     return PEData(
-                        handle=opened_file, path=file, file_type=file_type, verbose=options.verbose
+                        handle=opened_file,
+                        path=file,
+                        file_type=file_type,
+                        verbose=options.verbose,
                     )
                 case ".ELF":
-                    return ELFData(
-                        handle=opened_file, path=file, file_type=file_type
-                    )
+                    return ELFData(handle=opened_file, path=file, file_type=file_type)
                 case _:
                     # Default file handler
-                    return FileData(
-                        handle=opened_file, path=file, file_type=file_type
-                    )
+                    return FileData(handle=opened_file, path=file, file_type=file_type)
     except FileNotFoundError:
-        print("[!] File not found: " + file)
+        print("[EE] File not found: " + file)
         return None
     except Exception as e:
         # General exception handler
-        print(f"[!] Error while processing file '{file}': {e}")
+        print(f"[EE] Error while processing file '{file}': {e}")
         return None
 
 
@@ -432,13 +472,48 @@ def get_file_type(handle) -> list[tuple[str, str]]:
     magic = handle.read(32)
     poss_types: list[tuple[str, str]] = []
 
-    matches: list[sig.interface.FileSignature] = sig.find_matches_for_file_header(file_header=magic)
+    matches: list[sig.interface.FileSignature] = sig.find_matches_for_file_header(
+        file_header=magic
+    )
 
-    # Use matche(s) as (extension, description) tuple.
+    # List match(es) as (extension, description) tuple.
     for match in matches:
         poss_types.append((match.display_string, match.description))
 
     return poss_types
+
+
+def parse_data_as_json(file: FileData) -> dict:
+    """Given a file, generate a JSON friendly dictionary ready for logging"""
+    data: dict = {}
+
+    data["name"]    = file.name
+    data["size"]    = file.size
+    data["type"]    = file.type_description
+    data["hashes"]  = file.hash
+    data["bitness"] = file.bitness
+
+    match file.type:
+        case "MZ":
+            data["pe_is_dll"]       = file.pe_is_dll
+            data["pe_is_driver"]    = file.pe_is_driver
+            data["pe_mach_type"]    = file.pe_mach_type
+            data["pe_compile_time"] = file.pe_compile_time
+            data["pe_packers"]      = list(file.pe_packers)
+            data["pe_imphash"]      = file.pe_imphash
+            data["pe_imports"]      = {
+                dll: list(funcs) for dll, funcs in file.pe_imports.items()
+            }
+            data["pe_exports"]      = file.pe_exports
+            data["pe_sections"]     = file.pe_sections
+        case ".ELF":
+            data["elf_abi"]         = file.elf_abi
+            data["elf_mach_type"]   = file.elf_mach_type
+            data["elf_obj_type"]    = file.elf_obj_type
+        case _:
+            pass
+
+    return data
 
 
 def read_file_data(file: FileData, options: argparse.Namespace) -> str:
@@ -460,22 +535,18 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
         f"\nFile Size: {file.size} Bytes"
         f"\nFile Type: {file.type_description}"
         f"\nMD5: {file.hash['MD5']}"
-        #f"\nSHA1: {file.hash['SHA1']}"
+        # f"\nSHA1: {file.hash['SHA1']}"
         f"\nSHA256: {file.hash['SHA256']}"
         f"\n"
     )
 
     # Grab VT results
-    if options.virustotal:
-        if not VT_API_KEY:
-            output += (
-                "\nVirusTotal API key not found. Please input API key to triageboi.py."
-            )
+    if file.vt_result:
         for entry in file.vt_result.entries:
-            attr = entry['attributes']
+            attr = entry["attributes"]
             classification: str | None = None
             try:
-                classification = attr['popular_threat_classification'][
+                classification = attr["popular_threat_classification"][
                     "suggested_threat_label"
                 ]
             except KeyError:
@@ -495,25 +566,21 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
             if classification:
                 output += f"\nSuggested Threat Label: {classification}"
 
-    # Conditional prints based on file type
+    # Conditional information based on file type
     if "MZ" in file.type:
         # Standard PE Data
         output += (
             f"\n\nPE Data:"
             f"\nMachine Type: {file.pe_mach_type}"
             f"\nCompiled Time: {file.pe_compile_time}"
-            f"\nPacker: {file.pe_packers if file.pe_packers else "None detected"}"
+            f"\nPacker: {file.pe_packers if file.pe_packers else 'None detected'}"
         )
 
         if options.verbose:
             # Import hash and Rich header hash
-            output += (
-                f"\nImphash: {file.pe_imphash}"
-            )
+            output += f"\nImphash: {file.pe_imphash}"
             if file.pe_rich_header_hash:
-                output += (
-                    f"\nRich Header Hash: {file.pe_rich_header_hash}"
-                )
+                output += f"\nRich Header Hash: {file.pe_rich_header_hash}"
 
             # Import Data
             output += "\n\nImports:"
@@ -554,9 +621,9 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
                         f"\nSubject: {cert.subject.rfc4514_string()}"
                         f"\nVersion: {cert.version}"
                         f"\nInvalid Before: "
-                        f"{cert.not_valid_before_utc.strftime("%m/%d/%y  %H:%M:%S")}"
+                        f"{cert.not_valid_before_utc.strftime('%m/%d/%y  %H:%M:%S')}"
                         f"\nInvalid After: "
-                        f"{cert.not_valid_after_utc.strftime("%m/%d/%y  %H:%M:%S")}"
+                        f"{cert.not_valid_after_utc.strftime('%m/%d/%y  %H:%M:%S')}"
                         f"\nHash Algorithm: {cert.signature_hash_algorithm.name}"
                         f"\n--CERT END--"
                     )
@@ -579,21 +646,29 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
     return output
 
 
-def generate_log(file_name: str, log_output: str) -> None:
+def generate_log(log_output: str) -> None:
     """Create a log file for selected files"""
     try:
         # Generate log for single file
-        with open(file=file_name, mode="wb") as opened_file:
+        with open(file=TEXT_LOG_NAME, mode="wb+") as opened_file:
             opened_file.write(log_output.encode("utf-8"))
-    except IOError:
-        print(f"[!] Unable to create log file for: {file_name}.")
-    except TypeError:
-        print(f"[!] Unable to create log file for: {file_name} due to type error.")
+    except IOError as e:
+        print(f"{e}")
+    except TypeError as e:
+        print(f"{e}")
 
 
-def generate_json_log(file: str) -> None:
+def generate_json_log(files_to_process: list) -> None:
     """Create json file with log information"""
-    ...
+
+    json_parsed_files = [parse_data_as_json(file=file) for file in files_to_process]
+    try:
+        with open(file=JSON_LOG_NAME, mode="w+", encoding="utf-8") as log:
+            json.dump(obj=json_parsed_files, fp=log, indent=4)
+    except IOError as e:
+        print(f"{e}")
+    except TypeError as e:
+        print(f"{e}")
 
 
 def main(options: argparse.Namespace) -> None:
@@ -621,22 +696,31 @@ def main(options: argparse.Namespace) -> None:
     for file in filtered_files:
         if options.virustotal:
             # Check Virustotal
-            file.vt_result = VirusTotal(file.hash['SHA256'])
+            file.vt_result = VirusTotalData(file.hash["SHA256"])
             file.vt_result.check_hash()
         # Generate log data
         log_buffer += read_file_data(file=file, options=options)
 
+    # Outpout log data to JSON log file
+    if options.json:
+        generate_json_log(files_to_process=filtered_files)
     # Output log data to console
     if options.print:
         print(log_buffer)
     # Output log data to log file
     if options.log:
-        generate_log(file_name=options.log, log_output=log_buffer)
+        generate_log(log_output=log_buffer)
 
 
 # --- END FUNCTIONS ---
 
 # --- BEGIN GLOBALS ---
+
+CUR_TIME = time.strftime("%Y%m%d_%H%M%S")
+TEXT_LOG_NAME = f"triageboi_log_{CUR_TIME}.txt"
+JSON_LOG_NAME = f"triageboi_json_{CUR_TIME}.json"
+
+VERSION = "2.1.0"
 
 file_types: dict = {
     b"MZ": "PE File",
@@ -660,6 +744,7 @@ file_types: dict = {
     b"\xfe\xed\xfa\xcf": "Mach-O Binary (64-bit)",
     b"#!": "Shebang Script",
 }
+
 pe_mach_types: dict = {
     0x0: "UNKNOWN",
     0x184: "Alpha AXP",
@@ -691,6 +776,7 @@ pe_mach_types: dict = {
     0x1C2: "Thumb",
     0x169: "MIPS little-endian WCE v2",
 }
+
 pe_common_sections: set = {
     ".text",
     ".bss",
@@ -705,6 +791,7 @@ pe_common_sections: set = {
     ".rsrc",
     ".gfids",
 }
+
 pe_characteristics: dict = {
     0x0001: "RELOCS_STRIPPED",
     0x0002: "EXECUTABLE_IMAGE",
@@ -723,13 +810,16 @@ pe_characteristics: dict = {
     0x4000: "UP_SYSTEM_ONLY",
     0x8000: "BYTES_REVERSED_HI",
 }
+
 pe_packer_sections: dict[str, set[str]] = {
     # Sourced from: https://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
     "Molebox": {"1\\x00ata", "1\\x00data", "1\\x00TA", "ext"},
     "Alienyze": {".alien"},
     "Aspack": {".aspack", "ASPack", ".ASPack"},
     "Aspack/Armadillo": {".adata"},
-    "The Boomerang List Builder (config+exe xored with a single byte key 0x77)": {".boom"},
+    "The Boomerang List Builder (config+exe xored with a single byte key 0x77)": {
+        ".boom"
+    },
     "Themida": {".boot", "Themida", ".Themida", ".themida"},
     "CCG (Chinese)": {"ccg"},
     "Added by the PIN tool": {".charmve", ".pinclie"},
@@ -741,14 +831,21 @@ pe_packer_sections: dict[str, set[str]] = {
     "Expressor": {".ex_cod"},
     "Eronana": {".packer"},
     "FSG (not a section name, but a good identifier)": {"FSG!"},
-    "special section used for applications that can be loaded to OS desktop bands.": {".imrsiv"},
+    "special section used for applications that can be loaded to OS desktop bands.": {
+        ".imrsiv"
+    },
     "Gentee installer": {".gentee"},
     "JDPack": {".jdpack"},
     "kkrunchy": {"kkrunchy"},
     "Crinkler": {"lz32.dll"},
     "ImpRec-created section": {".mackt"},
     "MaskPE": {".MaskPE"},
-    "Mew": {"MEW", "MEW\\x00F\\x12\\xd2\\xc3", "MEW\x00F\x12\xd2\xc3", "2\\xd2u\\xdb\\x8a\\x16\\xeb\\xd4"},
+    "Mew": {
+        "MEW",
+        "MEW\\x00F\\x12\\xd2\\xc3",
+        "MEW\x00F\x12\xd2\xc3",
+        "2\\xd2u\\xdb\\x8a\\x16\\xeb\\xd4",
+    },
     "most likely associated with Firseria PUP downloaders": {".mnbvcx1", ".mnbvcx2"},
     "Mpress": {".MPRESS1", ".MPRESS2"},
     "Neolite": {".neolit", ".neolite"},
@@ -758,7 +855,18 @@ pe_packer_sections: dict[str, set[str]] = {
     "Packman": {".PACKMAN"},
     "Pepack": {"PEPACK!!"},
     "PEBundle": {"pebundle", "PEBundle"},
-    "PECompact": {"PEC2TO", "PEC2", "pec", "pec1", "pec2", "pec3", "pec4", "pec5", "pec6", "PEC2MO"},
+    "PECompact": {
+        "PEC2TO",
+        "PEC2",
+        "pec",
+        "pec1",
+        "pec2",
+        "pec3",
+        "pec4",
+        "pec5",
+        "pec6",
+        "PEC2MO",
+    },
     "PELock Protector": {"PELOCKnt"},
     "Perplex PE-Protector": {".perplex"},
     "PEShield": {"PESHiELD"},
@@ -790,6 +898,7 @@ pe_packer_sections: dict[str, set[str]] = {
     "Yoda Crypter": {"yC"},
     "Y0da Protector": {".yP", ".y0da"},
 }
+
 elf_abi_types: dict = {
     0x0: "System V",
     0x1: "HP-UX",
@@ -810,6 +919,7 @@ elf_abi_types: dict = {
     0x11: "CloudABI",
     0x12: "Stratus Technologies OpenVOS",
 }
+
 elf_obj_types: dict = {
     0x0: "None",
     0x1: "Relocatable",
@@ -817,6 +927,7 @@ elf_obj_types: dict = {
     0x3: "Shared Object",
     0x4: "Core",
 }
+
 elf_mach_types: dict = {
     0x00: "No specific instruction set",
     0x01: "AT&T WE 32100",
@@ -871,14 +982,20 @@ elf_mach_types: dict = {
     0x101: "WDC 65C816",
 }
 
+
 # --- END GLOBALS ---
 
+
+# --- BEGIN SETUP ---
+
+
 if __name__ == "__main__":
+
     # Set up argparse
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
-        prog="triageboi",
-        description="TRIAGEBOI is written and directed by biosboi.",
-        epilog="""[I] By default, triageboi will create a single log for
+        prog="triageboi.py",
+        description=f"triageboi {VERSION} is written and directed by biosboi.",
+        epilog="""[II] By default, triageboi will create a single log for
         every file in the directory it's located in.""",
     )
     parser.add_argument(
@@ -898,8 +1015,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "-l",
         "--log",
-        default=f"triageboi_log_{time.strftime("%Y%m%d_%H%M%S")}.txt",
-        help="Specify log file name",
+        action="store_true",
+        default=False,
+        help="Generate text log",
+    )
+    parser.add_argument(
+        "-j",
+        "--json",
+        action="store_true",
+        default=False,
+        help="Generate JSON log",
     )
     parser.add_argument(
         "-p",
@@ -920,8 +1045,11 @@ if __name__ == "__main__":
         "--verbose",
         action="store_true",
         default=False,
-        help="Increase output verbosity (Increases processing time)",
+        help="Increase output details (longer processing time)",
     )
     args: argparse.Namespace = parser.parse_args()
 
     main(options=args)
+
+
+# --- END SETUP ---
