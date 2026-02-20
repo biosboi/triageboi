@@ -16,7 +16,6 @@ VT_API_KEY: str = ""
 
 # --- BEGIN IMPORTS ---
 
-import time
 import argparse
 import hashlib
 import json
@@ -24,17 +23,18 @@ import os
 import requests
 import pefile
 import pyfsig as sig
+import time
 from asn1crypto import cms
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
+from tqdm import tqdm
 
 # --- END IMPORTS ---
 
 
 # --- BEGIN CLASSES ---
-
 
 class FileData:
     """Represents individual file"""
@@ -391,11 +391,9 @@ class VirusTotalData:
             pass
             # No entries found
 
-
 # --- END CLASSES ---
 
 # --- BEGIN FUNCTIONS ---
-
 
 def generate_file_data(file: str, options) -> FileData | None:
     """Take individual file and generate information to be logged"""
@@ -672,8 +670,13 @@ def generate_json_log(files_to_process: list) -> None:
 
 
 def main(options: argparse.Namespace) -> None:
-    """Initiate tool"""
+    """Process files and generate log"""
 
+    # If user doesn't provide log output method, default to text log
+    if options.log == False and options.json == False and options.print == False:
+        options.log = True
+
+    print(f"[II] triageboi {VERSION} executing...")
     # List of files to triage
     files_to_triage: list[str] = []
     # List of processed files
@@ -688,8 +691,12 @@ def main(options: argparse.Namespace) -> None:
         files_to_triage.extend(parse_paths(path=path, recurse=options.recursive))
 
     # Process all identified files
-    for file in files_to_triage:
-        triaged_files.append(generate_file_data(file=file, options=options))
+    num_files = len(files_to_triage)
+    print(f"[II] Processing {num_files} files...")
+
+    for i in tqdm(range(num_files), desc="[II] ", ascii=" TRIAGEBOI+"):
+        triaged_files.append(generate_file_data(file=files_to_triage[i], options=options))
+
     filtered_files = [item for item in triaged_files if item is not None]
 
     # Generate logs based on options
@@ -711,7 +718,6 @@ def main(options: argparse.Namespace) -> None:
     if options.log:
         generate_log(log_output=log_buffer)
 
-
 # --- END FUNCTIONS ---
 
 # --- BEGIN GLOBALS ---
@@ -721,29 +727,6 @@ TEXT_LOG_NAME = f"triageboi_log_{CUR_TIME}.txt"
 JSON_LOG_NAME = f"triageboi_json_{CUR_TIME}.json"
 
 VERSION = "2.1.0"
-
-file_types: dict = {
-    b"MZ": "PE File",
-    b"MZ\x90": "PE File",
-    b"\x7fELF": "ELF File",
-    b"PK": "DOCX/XLSX/PPTX/Jar/Zip File",
-    b"\x25PDF-": "PDF Document",
-    b"\x1f\x8b": "GZip File",
-    b"\x75\x73\x74\x61\x72": "Tar Archive",
-    b"\xd0\xcf\x11\xe0\xa1": "Compound File Binary Format",
-    b"\x1f\x9d": "Compressed File (Tar or Zip)",
-    b"\x1f\xa0": "Compressed File (Tar or Zip)",
-    b"\x52\x61\x72": "Rar Archive",
-    b"\x37\x7a\xbc\xaf": "7-Zip File",
-    b"\xff\xd8": "JPEG Image",
-    b"\x89PN": "PNG Image",
-    b"BM": "BMP Image",
-    b"GIF": "GIF Image",
-    b"\x6b\x6f\x6c\x79": "Apple Disk Image File",
-    b"\xfe\xed\xfa\xce": "Mach-O Binary (32-bit)",
-    b"\xfe\xed\xfa\xcf": "Mach-O Binary (64-bit)",
-    b"#!": "Shebang Script",
-}
 
 pe_mach_types: dict = {
     0x0: "UNKNOWN",
@@ -928,66 +911,10 @@ elf_obj_types: dict = {
     0x4: "Core",
 }
 
-elf_mach_types: dict = {
-    0x00: "No specific instruction set",
-    0x01: "AT&T WE 32100",
-    0x02: "SPARC",
-    0x03: "x86",
-    0x04: "Motorola 68000 (M68k)",
-    0x05: "Motorola 88000 (M88k)",
-    0x06: "Intel MCU",
-    0x07: "Intel 80860",
-    0x08: "MIPS",
-    0x09: "IBM System/370",
-    0x0A: "MIPS RS3000 Little-endian",
-    0x0E: "Hewlett-Packard PA-RISC",
-    0x0F: "Reserved for future use",
-    0x13: "Intel 80960",
-    0x14: "PowerPC",
-    0x15: "PowerPC (64-bit)",
-    0x16: "S390, including S390x",
-    0x17: "IBM SPU/SPC",
-    0x24: "NEC V800",
-    0x25: "Fujitsu FR20",
-    0x26: "TRW RH-32",
-    0x27: "Motorola RCE",
-    0x28: "ARM (up to ARMv7/Aarch32)",
-    0x29: "Digital Alpha",
-    0x2A: "SuperH",
-    0x2B: "SPARC Version 9",
-    0x2C: "Siemens TriCore embedded processor",
-    0x2D: "Argonaut RISC Core",
-    0x2E: "Hitachi H8/300",
-    0x2F: "Hitachi H8/300H",
-    0x30: "Hitachi H8S",
-    0x31: "Hitachi H8/500",
-    0x32: "IA-64",
-    0x33: "Stanford MIPS-X",
-    0x34: "Motorola ColdFire",
-    0x35: "Motorola M68HC12",
-    0x36: "Fujitsu MMA Multimedia Accelerator",
-    0x37: "Siemens PCP",
-    0x38: "Sony nCPU embedded RISC processor",
-    0x39: "Denso NDR1 microprocessor",
-    0x3A: "Motorola Star*Core processor",
-    0x3B: "Toyota ME16 processor",
-    0x3C: "STMicroelectronics ST100 processor",
-    0x3D: "Advanced Logic Corp. TinyJ embedded processor family",
-    0x3E: "AMD x86-64",
-    0x8C: "TMS320C6000 Family",
-    0xAF: "MCST Elbrus e2k",
-    0xB7: "ARM 64-bits (ARMv8/Aarch64)",
-    0xF3: "RISC-V",
-    0xF7: "Berkeley Packet Filter",
-    0x101: "WDC 65C816",
-}
-
-
 # --- END GLOBALS ---
 
 
 # --- BEGIN SETUP ---
-
 
 if __name__ == "__main__":
 

@@ -9,6 +9,7 @@ pycparser==2.23
 pyelftools==0.32
 pyfsig==1.1.1
 requests==2.32.5
+tqdm==4.67.3
 types-pefile==2023.2.7.post0
 types-requests==2.32.4.20260107
 urllib3==2.6.3

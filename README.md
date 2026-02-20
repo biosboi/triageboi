@@ -13,9 +13,21 @@ began in 2020 as a small script to consolidate file
 data from multiple sources into one text file ready
 for copying to any reporting template. Triageboi is
 designed to be modular so analysts can decide which
-types of data from files is pertinent to them. More
-features are in the works, Stay tuned.
+types of data from files is pertinent to them.
 
+The tool can be used against a single file or a whole directory
+and allows recursive scanning as well. Each file will be scanned
+and all information extracted will be logged to either the console,
+a text file, or a json file.
+
+All files recieve a "Basic Information" block including name, size,
+hashes (MD5/SHA256), type, and any VirusTotal results if the VirusTotal
+flag is set.
+
+Additinally, PE files and ELF files will receive an additional information
+block containing format specific details. Using the "-v" flag will increase
+verbosity, generating even more information such as extracting certificates
+from PE files.
 
 ## Getting Started
 
@@ -46,7 +58,15 @@ For additional options such as:
 * Specify custom log name
 
 ## Version History
-
+* 2.2.0 Progress bar Update
+   * Added progress bar to scan
+   * Additional readme notes on functionality
+   * Bugfix when no log method is selected
+* 2.1.0 JSON Output Update
+   * Added basic JSON output logger
+   * New ELF parser
+   * SHA-1 Hashing is now commented out, MD5 and SHA256 remain
+   * Some readability changes
 * 2.0.0
    * Reworked file type detection using pyfsig
    * Added ELF parsing with pyelftools
