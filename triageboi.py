@@ -20,15 +20,19 @@ import argparse
 import hashlib
 import json
 import os
+import time
+
 import requests
 import pefile
 import pyfsig as sig
-import time
+
 from asn1crypto import cms
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
+from macholib import MachO as mac
+from macholib import mach_o as mac_types
 from tqdm import tqdm
 
 # --- END IMPORTS ---
@@ -370,6 +374,43 @@ class ELFData(FileData):
             _segments.append(_seg)
 
 
+class MachOData(FileData):
+    """Represents individual file of type Mach-O"""
+
+    def __init__(self, handle, path, file_type):
+        FileData.__init__(self, handle, path, file_type)
+        self.macho_headers: dict = {}
+        try:
+            self._macho: mac.MachO = mac.MachO(filename=self.path)
+            self.type = "Mach-O"
+        except Exception as e:
+            print(f"[EE] Unknown Mach-O Exception: {e}")
+            return
+
+        # ---------------------------- #
+        # Headers
+        # ---------------------------- #
+        # Mach-O binaries can contain multiple architecture headers
+        for header in self._macho.headers:
+            header: mac_types.mach_header
+            h: dict = {}
+            h["cputype"] = mac_types.CPU_TYPE_NAMES.get(header.header.cputype)
+            h["cpusubtype"] = mac_types.get_cpu_subtype(
+                header.header.cputype,
+                header.header.cpusubtype
+            )
+            h["size"] = header.size
+            h["offset"] = header.offset
+            h["filetype"] = mac_types.MH_FILETYPE_NAMES.get(header.header.filetype)
+            h["flags"] = [
+                _flag
+                for _bit_value, _flag in mac_types.MH_FLAGS_NAMES.items()
+                if header.header.flags & _bit_value
+            ]
+
+            self.macho_headers[h["cputype"]] = h
+
+
 class VirusTotalData:
     """VirusTotal Processing"""
 
@@ -414,15 +455,17 @@ def generate_file_data(file: str, options) -> FileData | None:
 
             # Match display string
             match file_type[0]:
-                case "MZ":
+                case "MZ": # Portable Executable
                     return PEData(
                         handle=opened_file,
                         path=file,
                         file_type=file_type,
                         verbose=options.verbose,
                     )
-                case ".ELF":
+                case ".ELF": # Extensible and Linkable Format
                     return ELFData(handle=opened_file, path=file, file_type=file_type)
+                case _ if "Mach-O" in file_type[1]: # Mach-O Binary
+                    return MachOData(handle=opened_file, path=file, file_type=file_type)
                 case _:
                     # Default file handler
                     return FileData(handle=opened_file, path=file, file_type=file_type)
@@ -489,7 +532,8 @@ def parse_data_as_json(file: FileData) -> dict:
     data["size"]    = file.size
     data["type"]    = file.type_description
     data["hashes"]  = file.hash
-    data["bitness"] = file.bitness
+    if file.bitness != "Unknown":
+        data["bitness"] = file.bitness
 
     match file.type:
         case "MZ":
@@ -508,6 +552,19 @@ def parse_data_as_json(file: FileData) -> dict:
             data["elf_abi"]         = file.elf_abi
             data["elf_mach_type"]   = file.elf_mach_type
             data["elf_obj_type"]    = file.elf_obj_type
+        case "Mach-O":
+            data["macho_headers"] = []
+            for arch, header in file.macho_headers.items():
+                data["macho_headers"].append(
+                    {
+                        "arch": arch,
+                        "cpusubtype": header["cpusubtype"],
+                        "size": header["size"],
+                        "offset": header["offset"],
+                        "filetype": header["filetype"],
+                        "flags": header["flags"],
+                    }
+                )
         case _:
             pass
 
@@ -565,82 +622,98 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
                 output += f"\nSuggested Threat Label: {classification}"
 
     # Conditional information based on file type
-    if "MZ" in file.type:
-        # Standard PE Data
-        output += (
-            f"\n\nPE Data:"
-            f"\nMachine Type: {file.pe_mach_type}"
-            f"\nCompiled Time: {file.pe_compile_time}"
-            f"\nPacker: {file.pe_packers if file.pe_packers else 'None detected'}"
-        )
+    match file.type:
+        case "MZ":
+            # Standard PE Data
+            output += (
+                f"\n\nPE Data:"
+                f"\nMachine Type: {file.pe_mach_type}"
+                f"\nCompiled Time: {file.pe_compile_time}"
+                f"\nPacker: {file.pe_packers if file.pe_packers else 'None detected'}"
+            )
 
-        if options.verbose:
-            # Import hash and Rich header hash
-            output += f"\nImphash: {file.pe_imphash}"
-            if file.pe_rich_header_hash:
-                output += f"\nRich Header Hash: {file.pe_rich_header_hash}"
+            if options.verbose:
+                # Import hash and Rich header hash
+                output += f"\nImphash: {file.pe_imphash}"
+                if file.pe_rich_header_hash:
+                    output += f"\nRich Header Hash: {file.pe_rich_header_hash}"
 
-            # Import Data
-            output += "\n\nImports:"
-            for imp in file.pe_imports.keys():
-                output += f"\n{imp}"
-            # Export Data
-            if file.pe_exports:
-                output += "\n\nExports:"
-                for ordinal, export in file.pe_exports.items():
-                    output += f"\n#{ordinal}: {export}"
+                # Import Data
+                output += "\n\nImports:"
+                for imp in file.pe_imports.keys():
+                    output += f"\n{imp}"
 
-            # Section Data
-            output += "\n\nSections:\n"
-            output += "\n".join(file.pe_sections)
+                # Export Data
+                if file.pe_exports:
+                    output += "\n\nExports:"
+                    for ordinal, export in file.pe_exports.items():
+                        output += f"\n#{ordinal}: {export}"
 
-            # Characteristics
-            output += "\n\nCharacteristics:\n"
-            output += "\n".join(file.pe_characteristics)
+                # Section Data
+                output += "\n\nSections:\n"
+                output += "\n".join(file.pe_sections)
 
-            # Version Information
-            if file.pe_version_info:
-                output += "\n\nVersion Information:"
-                for key, value in file.pe_version_info.items():
-                    # Check if the key/value is a byte string and decode it if so
-                    key: str = key.decode("utf-8") if isinstance(key, bytes) else key
-                    value: str = (
-                        value.decode("utf-8") if isinstance(value, bytes) else value
-                    )
-                    output += f"\n{key}: {value}"
+                # Characteristics
+                output += "\n\nCharacteristics:\n"
+                output += "\n".join(file.pe_characteristics)
 
-            # Certificate Information
-            if file.pe_certs:
-                output += "\n\nCertificate Information:"
-                for cert in file.pe_certs:
-                    output += (
-                        f"\n--CERT BEGIN--"
-                        f"\nIssuer: {cert.issuer.rfc4514_string()}"
-                        f"\nSubject: {cert.subject.rfc4514_string()}"
-                        f"\nVersion: {cert.version}"
-                        f"\nInvalid Before: "
-                        f"{cert.not_valid_before_utc.strftime('%m/%d/%y  %H:%M:%S')}"
-                        f"\nInvalid After: "
-                        f"{cert.not_valid_after_utc.strftime('%m/%d/%y  %H:%M:%S')}"
-                        f"\nHash Algorithm: {cert.signature_hash_algorithm.name}"
-                        f"\n--CERT END--"
-                    )
+                # Version Information
+                if file.pe_version_info:
+                    output += "\n\nVersion Information:"
+                    for key, value in file.pe_version_info.items():
+                        # Check if the key/value is a byte string and decode it if so
+                        key: str = key.decode("utf-8") if isinstance(key, bytes) else key
+                        value: str = (
+                            value.decode("utf-8") if isinstance(value, bytes) else value
+                        )
+                        output += f"\n{key}: {value}"
 
-        # Funky Section Names
-        if file.funky_sections:
-            output += "\n\nUnusual Section Names Found:\n"
-            output += "\n".join(file.funky_sections)
+                # Certificate Information
+                if file.pe_certs:
+                    output += "\n\nCertificate Information:"
+                    for cert in file.pe_certs:
+                        output += (
+                            f"\n--CERT BEGIN--"
+                            f"\nIssuer: {cert.issuer.rfc4514_string()}"
+                            f"\nSubject: {cert.subject.rfc4514_string()}"
+                            f"\nVersion: {cert.version}"
+                            f"\nInvalid Before: "
+                            f"{cert.not_valid_before_utc.strftime('%m/%d/%y  %H:%M:%S')}"
+                            f"\nInvalid After: "
+                            f"{cert.not_valid_after_utc.strftime('%m/%d/%y  %H:%M:%S')}"
+                            f"\nHash Algorithm: {cert.signature_hash_algorithm.name}"
+                            f"\n--CERT END--"
+                        )
 
-    elif ".ELF" in file.type:
-        # Standard ELF Data
-        output += (
-            f"\n\nELF Data:"
-            f"\nABI: {file.elf_abi}"
-            f"\nObject File Type: {file.elf_obj_type}"
-            f"\nMachine Type: {file.elf_mach_type}\n"
-        )
-    else:
-        pass
+            # Funky Section Names
+            if file.funky_sections:
+                output += "\n\nUnusual Section Names Found:\n"
+                output += "\n".join(file.funky_sections)
+        case ".ELF":
+            # Standard ELF Data
+            output += (
+                f"\n\nELF Data:"
+                f"\nABI: {file.elf_abi}"
+                f"\nObject File Type: {file.elf_obj_type}"
+                f"\nMachine Type: {file.elf_mach_type}\n"
+            )
+        case "Mach-O":
+            output += (
+                "\n\nMach-O Data:"
+                "\nMachine Headers:"
+            )
+            for arch, header in file.macho_headers.items():
+                output += (
+                    f"\n  CPU Type: {arch}"
+                    f"\n  - CPU Subtype: {header["cpusubtype"]}"
+                    f"\n  - Size: {header["size"]}"
+                    f"\n  - Offset: {header["offset"]}"
+                    f"\n  - Filetype: {header["filetype"]}"
+                )
+                flags = ", ".join(header["flags"])
+                output += f"\n  - Flags: {flags}"
+        case _:
+            pass
     return output
 
 
@@ -673,9 +746,12 @@ def main(options: argparse.Namespace) -> None:
     """Process files and generate log"""
 
     # If user doesn't provide log output method, default to text log
-    if options.log == False and options.json == False and options.print == False:
+    if options.log is False and options.json is False and options.print is False:
         options.log = True
 
+    # ---------------------------- #
+    # Parse files
+    # ---------------------------- #
     print(f"[II] triageboi {VERSION} executing...")
     # List of files to triage
     files_to_triage: list[str] = []
@@ -690,7 +766,9 @@ def main(options: argparse.Namespace) -> None:
         # Iterate through every path in options and parse for files/directories
         files_to_triage.extend(parse_paths(path=path, recurse=options.recursive))
 
-    # Process all identified files
+    # ---------------------------- #
+    # Triage files
+    # ---------------------------- #
     num_files = len(files_to_triage)
     print(f"[II] Processing {num_files} files...")
 
@@ -699,7 +777,9 @@ def main(options: argparse.Namespace) -> None:
 
     filtered_files = [item for item in triaged_files if item is not None]
 
-    # Generate logs based on options
+    # ---------------------------- #
+    # Generate Print Data
+    # ---------------------------- #
     for file in filtered_files:
         if options.virustotal:
             # Check Virustotal
@@ -708,7 +788,10 @@ def main(options: argparse.Namespace) -> None:
         # Generate log data
         log_buffer += read_file_data(file=file, options=options)
 
-    # Outpout log data to JSON log file
+    # ---------------------------- #
+    # Generate Logs
+    # ---------------------------- #
+    # Output log data to JSON log file
     if options.json:
         generate_json_log(files_to_process=filtered_files)
     # Output log data to console

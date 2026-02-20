@@ -58,6 +58,8 @@ For additional options such as:
 * Specify custom log name
 
 ## Version History
+* 2.3.0 Mach-O Update
+   * Added Mach-O parsing
 * 2.2.0 Progress bar Update
    * Added progress bar to scan
    * Additional readme notes on functionality
