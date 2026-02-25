@@ -1,33 +1,16 @@
 # TRIAGEBOI
 
-Just another Python triage tool.
-The main goal is to collect all required metadata into
-one easily copyable log format for one or many files.
-
 ## Description
 
-Triageboi is a reverse engineering tool designed to
-decrease initial triage time by collecting multiple
-simple tasks into one easy to use tool. The project
-began in 2020 as a small script to consolidate file
-data from multiple sources into one text file ready
-for copying to any reporting template. Triageboi is
-designed to be modular so analysts can decide which
-types of data from files is pertinent to them.
+Triageboi is a reverse engineering tool designed to decrease initial triage time by scanning one or many files and generating metadata into several log formats (text or json). Special metadata blocks are generated for ELf, PE, and Mach-O files.
 
-The tool can be used against a single file or a whole directory
-and allows recursive scanning as well. Each file will be scanned
-and all information extracted will be logged to either the console,
-a text file, or a json file.
+All files recieve a "Standard Information" block including name, size, hashes (MD5/SHA256), type, and any VirusTotal results if a VirusTotal API key is provided.
 
-All files recieve a "Basic Information" block including name, size,
-hashes (MD5/SHA256), type, and any VirusTotal results if the VirusTotal
-flag is set.
+Additinally, PE, ELF, and Mach-O binaries will receive an additional information block containing format specific details. Using the "-v" flag will increase verbosity, generating even more information such as displaying imports and extracting certificates from PE files.
 
-Additinally, PE files and ELF files will receive an additional information
-block containing format specific details. Using the "-v" flag will increase
-verbosity, generating even more information such as extracting certificates
-from PE files.
+### Motivation
+
+The project began in 2020 as a small script to consolidate file data from multiple sources into one text file ready for copying to any reporting template. Single files are quick and easy to pull metadata from, but when receiving a dozen at a time for analysis, the process becomes increasingly prone to error. Triageboi seeks to resolve that issue by creating a single log file containing all scanned files' metadata for use in a reporting document or analysis notes.
 
 ## Getting Started
 
@@ -36,28 +19,48 @@ from PE files.
 * Python 3
 * See requirements.txt for required modules
 
-### Executing program
-
 Python dependencies can be resolved with the command:
 ```
 pip install -r requirements.txt
 ```
+### Execution and Usage
 
-Executing triageboi.py on its own will create a log
-in the same directory named triageboi_log.txt.
+Triageboi can execute against single files or directories. If running against a single file, add that file as an argument:
+```
+python triageboi.py <filename>
+```
 
-Use the command:
+To run against an entire directory, either execute the script with no arguments to scan the current directory or provide the directory name
+```
+python triageboi.py
+python triageboi.py <dirname>
+```
+
+Triageboi must be given a log format:
+    -l, --log   : text log
+    -j, --json  : json
+    -p, --print : print to console
+If no log flag is provided, triageboi will default to a (-l) text log.
+
+If producing a log file, (as opposed to printing to the console) upon completion of the triageboi scan, a file will be created in the current working directory named triageboi_log_<timestamp>.<json|txt>.
+
+
+A help menu can be displayed by using the -h,--help flag:
 ```
 python triageboi.py -h
 ```
-For additional options such as:
+This menu provides information on additional options such as:
 * Running recursively against a directory
-* Printing log directly to console
-* Increase verbosity on output
-* Send hash to VirusTotal for results scanning
+* Increasing verbosity
+* Sending hashes to VirusTotal (NOTE: Files are never uploaded to VirusTotal via this method, only hashes)
 * Specify custom log name
 
 ## Version History
+* 2.4.0 PE Parse Update
+   * New PE Directory parsing
+   * Better Version Information extraction
+   * Safer PE log generation
+   * Updated PE common section names
 * 2.3.0 Mach-O Update
    * Added Mach-O parsing
 * 2.2.0 Progress bar Update

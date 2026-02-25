@@ -40,12 +40,13 @@ from tqdm import tqdm
 
 # --- BEGIN CLASSES ---
 
+
 class FileData:
     """Represents individual file"""
 
     def __init__(self, handle, path: str, file_type: tuple[str, str] | None):
         """Standard file information"""
-        self.bitness: str = "Unknown"
+        self.bitness: str | None = None
         self.path: str = path
         self.name: str = os.path.basename(self.path)
         self.handle = handle
@@ -95,22 +96,30 @@ class PEData(FileData):
         # PE File Information
         self.pe_mach_type: str = "Unknown"
         self.pe_compile_time: str = "Unknown"
+        self.pe_is_exe: bool = False
         self.pe_is_dll: bool = False
         self.pe_is_driver: bool = False
         self.pe_characteristics: list = []
-        self.pe_version_info: dict = {}
-        self.pe_certs: list[dict] = []
+        self.pe_dll_characteristics: list = []
         # Additional Hashes Information
-        self.pe_imphash: str = "Unknown"
-        self.pe_rich_header_hash: str = "Unknown"
+        self.pe_imphash: str = ""
+        self.pe_exphash: str = ""
+        self.pe_rich_header_hash: str = ""
         # Import/Export Information
         self.pe_imports: dict[str, set[str]] = {}
         self.pe_exports: dict[int, str] = {}
         # PE Section Information
         self.pe_packers: set[str] = set()
-        self.pe_sections: list[str] = []
+        self.pe_sections: dict[str, dict] = {}
         self.pe_tls: dict = {}
-        self.funky_sections: list[str] = []
+        self.pe_funky_sections: list[str] = []
+        # Version Information
+        self.pe_version_info: dict = {}
+        # Certificate Information
+        self.pe_certs: list[dict] = []
+        # Directories
+        self.pe_directories: dict = {}
+        self.pe_debug: dict[str, str] = {}
 
         self._pe: pefile.PE | None = None
         self._pe_dict: dict | None = None
@@ -121,6 +130,13 @@ class PEData(FileData):
         try:
             if verbose:
                 self._pe = pefile.PE(name=path, fast_load=False)
+                # Parse Data Directories
+                self._pe.parse_data_directories()
+                for _dir in pe_directories:
+                    self.pe_directories[_dir] = getattr(self._pe, _dir, None)
+                self.pe_directories = {
+                    k: v for k, v in self.pe_directories.items() if v
+                }
             else:
                 self._pe = pefile.PE(name=path, fast_load=True)
 
@@ -128,6 +144,8 @@ class PEData(FileData):
         except pefile.PEFormatError:
             print(f"[EE] {self.name} is not a valid PE file.")
             return
+        except Exception as e:
+            print(f"[EE] Unknown error occurred while parsing PE file {self.name}: {e}")
 
         # ---------------------------- #
         # Machine Type
@@ -140,6 +158,7 @@ class PEData(FileData):
         # Additional Hashes
         # ---------------------------- #
         self.pe_imphash = self._pe.get_imphash().upper()
+        self.pe_exphash = self._pe.get_exphash().upper()
         self.pe_rich_header_hash = str(self._pe.get_rich_header_hash()).upper()
 
         # ---------------------------- #
@@ -153,12 +172,11 @@ class PEData(FileData):
             self.bitness = "Unknown"
 
         # ---------------------------- #
-        # Library or Driver
+        # Library | Driver | Executable
         # ---------------------------- #
-        if self._pe.is_dll():
-            self.pe_is_dll = True
-        if self._pe.is_driver():
-            self.pe_is_driver = True
+        self.pe_is_exe = self._pe.is_exe()
+        self.pe_is_dll = self._pe.is_dll()
+        self.pe_is_driver = self._pe.is_driver()
 
         # ---------------------------- #
         # Characteristics
@@ -171,6 +189,7 @@ class PEData(FileData):
             for _bit_value, _characteristic in pe_characteristics.items()
             if _characteristics_val & _bit_value
         ]
+        self.pe_dll_characteristics = self._pe_dict["DllCharacteristics"]
 
         # ---------------------------- #
         # Compile Time
@@ -178,29 +197,6 @@ class PEData(FileData):
         self.pe_compile_time = self._pe_dict["FILE_HEADER"]["TimeDateStamp"][
             "Value"
         ].split("[")[1][:-1]
-
-        # ---------------------------- #
-        # Imports
-        # ---------------------------- #
-        _api: str
-        _imported_symbols: dict = self._pe_dict.get("Imported symbols", [])
-
-        for _import in _imported_symbols:
-            # Skip import descriptor
-            _import = _import[1:]
-            # Grab DLL name
-            _dll_info = _import[0]["DLL"]
-            _api = _dll_info.decode("utf-8") if _dll_info else "Unknown DLL"
-            # Assign functions to DLL in dictionary as list
-            self.pe_imports[_api] = {
-                # Handles when there is an ordinal, but no name
-                (
-                    _func.get("Name", "").decode("utf-8")
-                    if _func.get("Name")
-                    else _func.get("Ordinal")
-                )
-                for _func in _import
-            }
 
         # ---------------------------- #
         # Delayed Imports
@@ -225,33 +221,20 @@ class PEData(FileData):
             }
 
         # ---------------------------- #
-        # Export Data
-        # ---------------------------- #
-        _exported_symbols: dict = self._pe_dict.get("Exported symbols", [])
-
-        # Skip Export Directory
-        for _export in _exported_symbols[1:]:
-            # Check if the name exists
-            if _export["Name"] is not None:
-                self.pe_exports[_export["Ordinal"]] = _export["Name"].decode("utf-8")
-            else:
-                # If no name, use only ordinal
-                self.pe_exports[_export["Ordinal"]] = "<Unnamed Export>"
-        # Sort by ordinal
-        self.pe_exports = dict(sorted(self.pe_exports.items()))
-
-        # ---------------------------- #
         # Sections
         # ---------------------------- #
         for _section in self._pe_dict["PE Sections"]:
             # Sometimes section names have null bytes and/or whitespace attached
             _name: str = _section["Name"]["Value"].strip("\\x00").strip()
-            self.pe_sections.append(_name)
+            self.pe_sections[_name] = {
+                "MD5": _section["MD5"],
+                "SHA256": _section["SHA256"],
+            }
 
             # Funky section check
             # Based on standard section name list, find outliers
             if _name not in pe_common_sections:
-                self.funky_sections.append(_name)
+                self.pe_funky_sections.append(_name)
                 # Funky section names sometimes indicate a packer is present
                 # Packer check against section names
                 for packer, sec_names in pe_packer_sections.items():
@@ -262,64 +245,133 @@ class PEData(FileData):
         # ---------------------------- #
         # Directory Parser
         # ---------------------------- #
+        for _dir, _data in self.pe_directories.items():
+            match _dir:
+                case "DIRECTORY_ENTRY_EXPORT":           # Export Directory
+                    for _export in _data.symbols:
+                        _name = _export.name.decode("utf-8", errors="replace")
+                        self.pe_exports[_export.ordinal] = str(_name)
+                case "DIRECTORY_ENTRY_IMPORT":           # Import Directory
+                    _imports: set[str] = set()
+                    for _dll in _data:
+                        _dll_name = _dll.dll.decode("utf-8", errors="replace")
+                        for i in _dll.imports:
+                            if i.name:
+                                _imports.add(i.name.decode("utf-8", errors="replace"))
+                            else:
+                                _imports.add(f"ordinal:{i.ordinal}")
+                        self.pe_imports[_dll_name] = sorted(_imports)
+                case "DIRECTORY_ENTRY_RESOURCE":         # Resource Directory
+                    pass
+                case "DIRECTORY_ENTRY_EXCEPTION":        # Exception Directory
+                    pass
+                case "DIRECTORY_ENTRY_SECURITY":         # Security Directory
+                    pass
+                case "DIRECTORY_ENTRY_BASERELOC":        # Base Relocation Directory
+                    pass
+                case "DIRECTORY_ENTRY_DEBUG":            # Debug Directory
+                    for i in _data:
+                        if hasattr(i, "entry") and i.entry:
+                            _sig_string: str = getattr(
+                                i.entry, "Signature_String", None
+                            )
+                            _pdb_name: str = getattr(i.entry, "PdbFileName", None)
+                            _pdb_name = (
+                                _pdb_name.decode("utf-8").rstrip("\x00")
+                                if _pdb_name
+                                else None
+                            )
+                            self.pe_debug[i.entry.name] = {
+                                "Signature": _sig_string,
+                                "PdbFileName": _pdb_name,
+                            }
+                case "DIRECTORY_ENTRY_COPYRIGHT":        # Copyright Directory
+                    pass
+                case "DIRECTORY_ENTRY_GLOBALPTR":        # RVA of GlobalPtr Directory
+                    pass
+                case "DIRECTORY_ENTRY_TLS":              # Thread Local Storage Directory
+                    pass
+                case "DIRECTORY_ENTRY_LOAD_CONFIG":  # Load Configuration Directory
+                    self.pe_security_cookie = hex(
+                        getattr(_data.struct, "SecurityCookie", None)
+                    )
+                case "DIRECTORY_ENTRY_BOUND_IMPORT":  # Bound Import Directory
+                    pass
+                case "DIRECTORY_ENTRY_IAT":              # Import Address Table
+                    pass
+                case "DIRECTORY_ENTRY_DELAY_IMPORT":     # Delay Load Import Directory
+                    self.pe_delay_imports: dict[str, set[str]] = {}
+                    _imports: set[str] = set()
+                    for _dll in _data:
+                        _dll_name = _dll.dll.decode("utf-8", errors="replace")
+                        for i in _dll.imports:
+                            if i.name:
+                                _imports.add(i.name.decode("utf-8", errors="replace"))
+                            else:
+                                _imports.add(f"ordinal:{i.ordinal}")
+                        self.pe_delay_imports[_dll_name] = sorted(_imports)
+                case "DIRECTORY_ENTRY_COM_DESCRIPTOR":   # CLR Header/.NET Directory
+                    pass
+                case _:
+                    pass
+
+        # Standard directory parsing does not adequately some data
+        # Manually searching for them may be required
         for _entry in self._pe_dict["Directories"]:
-            self.handle.seek(0)
-            _sigoff: int = _entry["VirtualAddress"]["Value"]
-            _sigsize: int = _entry["Size"]["Value"]
-            _raw_sig: bytes
-
-            ## TLS Data
-            if _entry["Structure"] == "IMAGE_DIRECTORY_ENTRY_TLS":
-                if _sigoff > 0:
-                    # Entry exists
-                    _raw_sig = self.handle.read(_sigsize)[8:]
-                # TODO TLS Data handler
-
-            ## Cert Data
+            # ---------------------------- #
+            # Certificate Information
+            # ---------------------------- #
             if _entry["Structure"] == "IMAGE_DIRECTORY_ENTRY_SECURITY":
+                self.handle.seek(0)
+                _sigoff: int = _entry["VirtualAddress"]["Value"]
+                _sigsize: int = _entry["Size"]["Value"]
+                _raw: bytes
+
                 if _sigoff > 0:
                     # Entry exists
                     self.handle.seek(_sigoff)
-                    _raw_sig = self.handle.read(_sigsize)[8:]
+                    _raw = self.handle.read(_sigsize)[8:]
                     # Catch invalid cert blocks
                     try:
                         _signature: cms.ContentInfo = cms.ContentInfo.load(
-                            encoded_data=_raw_sig
+                            encoded_data=_raw
                         )
                         for _cert in _signature["content"]["certificates"]:
-                            parsed_cert = x509.load_der_x509_certificate(
+                            _parsed_cert = x509.load_der_x509_certificate(
                                 data=_cert.dump(),
                                 backend=default_backend(),
                             )
-                            self.pe_certs.append(parsed_cert)
+                            self.pe_certs.append(_parsed_cert)
                     except ValueError:
                         # Most failures appear to be associated with packers
                         pass
                     except TypeError:
-                        # Most failures appear to be associated with packers
                         pass
+                    break
 
         # ---------------------------- #
         # Version Information
         # ---------------------------- #
         _version_info: dict = self._pe_dict.get("Version Information", [])
-        if _version_info:
-            # Handles first entry only. Couldn't identify a case where there
-            # were more than one entries, so this should suffice. Could be
-            # safer and handle additional entries in the future.
-            try:
-                for _entry in _version_info:
-                    if type(_entry):
-                        # Potentially better way to handle entries
-                        # TODO
-                        ...
-                    # Searches for valid entry
-                    if isinstance(_entry, dict) and "Length" not in _entry:
-                        self.pe_version_info = _entry
-                        break
-            except IndexError:
-                # String info not found
-                pass
+        for _entry in _version_info:
+            for _sub in _entry:
+                if isinstance(_sub, list):
+                    for i in _sub:
+                        if isinstance(i, dict) and "Structure" not in i:
+                            _decoded: dict = {}
+                            for k, v in i.items():
+                                key = (
+                                    k.decode("utf-8", "ignore")
+                                    if isinstance(k, bytes)
+                                    else k
+                                )
+                                val = (
+                                    v.decode("utf-8", "ignore")
+                                    if isinstance(v, bytes)
+                                    else v
+                                )
+                                _decoded[key] = val
+                            self.pe_version_info.update(_decoded)
 
 
 class ELFData(FileData):
@@ -358,7 +410,14 @@ class ELFData(FileData):
         _sections: list[dict] = []
         _sec: dict = {}
 
-        for i in self._elf.iter_sections():
+        try:
+            _secs = list(self._elf.iter_sections())
+        except ELFError as e:
+            # Sections sometimes fail to extract
+            # TODO
+            ...
+
+        for i in _secs:
             _sec = dict(i.header)
             _sec["name"] = i.name if i.name else "None"
             _sections.append(_sec)
@@ -383,7 +442,11 @@ class MachOData(FileData):
         try:
             self._macho: mac.MachO = mac.MachO(filename=self.path)
             self.type = "Mach-O"
+            # Java Class files and some Mach-Os have the same magic header
+            if "Java" in self.type_description:
+                self.type_description = "Mach-O Fat Binary"
         except Exception as e:
+            # FIXME: Java Class files fall here
             print(f"[EE] Unknown Mach-O Exception: {e}")
             return
 
@@ -396,8 +459,7 @@ class MachOData(FileData):
             h: dict = {}
             h["cputype"] = mac_types.CPU_TYPE_NAMES.get(header.header.cputype)
             h["cpusubtype"] = mac_types.get_cpu_subtype(
-                header.header.cputype,
-                header.header.cpusubtype
+                header.header.cputype, header.header.cpusubtype
             )
             h["size"] = header.size
             h["offset"] = header.offset
@@ -432,9 +494,11 @@ class VirusTotalData:
             pass
             # No entries found
 
+
 # --- END CLASSES ---
 
 # --- BEGIN FUNCTIONS ---
+
 
 def generate_file_data(file: str, options) -> FileData | None:
     """Take individual file and generate information to be logged"""
@@ -455,16 +519,16 @@ def generate_file_data(file: str, options) -> FileData | None:
 
             # Match display string
             match file_type[0]:
-                case "MZ": # Portable Executable
+                case "MZ":  # Portable Executable
                     return PEData(
                         handle=opened_file,
                         path=file,
                         file_type=file_type,
                         verbose=options.verbose,
                     )
-                case ".ELF": # Extensible and Linkable Format
+                case ".ELF":  # Extensible and Linkable Format
                     return ELFData(handle=opened_file, path=file, file_type=file_type)
-                case _ if "Mach-O" in file_type[1]: # Mach-O Binary
+                case _ if "Mach-O" in file_type[1]:  # Mach-O Binary
                     return MachOData(handle=opened_file, path=file, file_type=file_type)
                 case _:
                     # Default file handler
@@ -532,22 +596,27 @@ def parse_data_as_json(file: FileData) -> dict:
     data["size"]    = file.size
     data["type"]    = file.type_description
     data["hashes"]  = file.hash
-    if file.bitness != "Unknown":
+    if getattr(file, "bitness", None):
         data["bitness"] = file.bitness
 
     match file.type:
         case "MZ":
-            data["pe_is_dll"]       = file.pe_is_dll
-            data["pe_is_driver"]    = file.pe_is_driver
-            data["pe_mach_type"]    = file.pe_mach_type
-            data["pe_compile_time"] = file.pe_compile_time
-            data["pe_packers"]      = list(file.pe_packers)
-            data["pe_imphash"]      = file.pe_imphash
-            data["pe_imports"]      = {
+            data["pe_is_dll"]           = file.pe_is_dll
+            data["pe_is_driver"]        = file.pe_is_driver
+            data["pe_is_executable"]    = file.pe_is_driver
+            data["pe_mach_type"]        = file.pe_mach_type
+            data["pe_compile_time"]     = file.pe_compile_time
+            data["pe_packers"]          = list(file.pe_packers)
+            data["pe_imphash"]          = file.pe_imphash
+            data["pe_exphash"]          = file.pe_exphash
+            data["pe_rich_header_hash"] = file.pe_rich_header_hash
+            data["pe_imports"]          = {
                 dll: list(funcs) for dll, funcs in file.pe_imports.items()
             }
             data["pe_exports"]      = file.pe_exports
             data["pe_sections"]     = file.pe_sections
+            data["pe_debug"]        = file.pe_debug
+            data["pe_version_info"] = file.pe_version_info
         case ".ELF":
             data["elf_abi"]         = file.elf_abi
             data["elf_mach_type"]   = file.elf_mach_type
@@ -576,12 +645,7 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
     output: str = ""
 
     # Create header
-    output += (
-        f"\n\n{'-' * 65}"
-        f"\nTRIAGEBOI Output For File: {file.name}"
-        f"\n{'-' * 65}"
-        f"\n"
-    )
+    output += f"\n\n{'-' * 65}" f"\nTRIAGEBOI: {file.name}" f"\n{'-' * 65}" f"\n"
 
     # Grab standard file data
     output += (
@@ -592,7 +656,6 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
         f"\nMD5: {file.hash['MD5']}"
         # f"\nSHA1: {file.hash['SHA1']}"
         f"\nSHA256: {file.hash['SHA256']}"
-        f"\n"
     )
 
     # Grab VT results
@@ -634,8 +697,11 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
 
             if options.verbose:
                 # Import hash and Rich header hash
-                output += f"\nImphash: {file.pe_imphash}"
-                if file.pe_rich_header_hash:
+                if getattr(file, "pe_imphash", None):
+                    output += f"\nImphash: {file.pe_imphash}"
+                if getattr(file, "pe_exphash", None):
+                    output += f"\nExphash: {file.pe_exphash}"
+                if getattr(file, "pe_rich_header_hash", None):
                     output += f"\nRich Header Hash: {file.pe_rich_header_hash}"
 
                 # Import Data
@@ -644,32 +710,32 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
                     output += f"\n{imp}"
 
                 # Export Data
-                if file.pe_exports:
+                if getattr(file, "pe_exports", None):
                     output += "\n\nExports:"
                     for ordinal, export in file.pe_exports.items():
                         output += f"\n#{ordinal}: {export}"
 
                 # Section Data
                 output += "\n\nSections:\n"
-                output += "\n".join(file.pe_sections)
+                for section in file.pe_sections:
+                    output += f"{section}\n"
 
                 # Characteristics
-                output += "\n\nCharacteristics:\n"
-                output += "\n".join(file.pe_characteristics)
+                if getattr(file, "pe_characteristics", None):
+                    output += "\nCharacteristics:\n"
+                    output += "\n".join(file.pe_characteristics)
+                if getattr(file, "pe_dll_characteristics", None):
+                    output += "\n\nDLL Characteristics:\n"
+                    output += "\n".join(file.pe_dll_characteristics)
 
                 # Version Information
-                if file.pe_version_info:
+                if getattr(file, "pe_version_info", None):
                     output += "\n\nVersion Information:"
                     for key, value in file.pe_version_info.items():
-                        # Check if the key/value is a byte string and decode it if so
-                        key: str = key.decode("utf-8") if isinstance(key, bytes) else key
-                        value: str = (
-                            value.decode("utf-8") if isinstance(value, bytes) else value
-                        )
                         output += f"\n{key}: {value}"
 
                 # Certificate Information
-                if file.pe_certs:
+                if getattr(file, "pe_certs", None):
                     output += "\n\nCertificate Information:"
                     for cert in file.pe_certs:
                         output += (
@@ -686,22 +752,19 @@ def read_file_data(file: FileData, options: argparse.Namespace) -> str:
                         )
 
             # Funky Section Names
-            if file.funky_sections:
+            if getattr(file, "pe_funky_sections", None):
                 output += "\n\nUnusual Section Names Found:\n"
-                output += "\n".join(file.funky_sections)
+                output += "\n".join(file.pe_funky_sections)
         case ".ELF":
             # Standard ELF Data
             output += (
                 f"\n\nELF Data:"
                 f"\nABI: {file.elf_abi}"
                 f"\nObject File Type: {file.elf_obj_type}"
-                f"\nMachine Type: {file.elf_mach_type}\n"
+                f"\nMachine Type: {file.elf_mach_type}"
             )
         case "Mach-O":
-            output += (
-                "\n\nMach-O Data:"
-                "\nMachine Headers:"
-            )
+            output += "\n\nMach-O Data:" "\nMachine Headers:"
             for arch, header in file.macho_headers.items():
                 output += (
                     f"\n  CPU Type: {arch}"
@@ -746,8 +809,8 @@ def main(options: argparse.Namespace) -> None:
     """Process files and generate log"""
 
     # If user doesn't provide log output method, default to text log
-    if options.log is False and options.json is False and options.print is False:
-        options.log = True
+    if not options.log and not options.json and options.print is False:
+        options.log = TEXT_LOG_NAME
 
     # ---------------------------- #
     # Parse files
@@ -773,7 +836,9 @@ def main(options: argparse.Namespace) -> None:
     print(f"[II] Processing {num_files} files...")
 
     for i in tqdm(range(num_files), desc="[II] ", ascii=" TRIAGEBOI+"):
-        triaged_files.append(generate_file_data(file=files_to_triage[i], options=options))
+        triaged_files.append(
+            generate_file_data(file=files_to_triage[i], options=options)
+        )
 
     filtered_files = [item for item in triaged_files if item is not None]
 
@@ -801,6 +866,7 @@ def main(options: argparse.Namespace) -> None:
     if options.log:
         generate_log(log_output=log_buffer)
 
+
 # --- END FUNCTIONS ---
 
 # --- BEGIN GLOBALS ---
@@ -809,7 +875,7 @@ CUR_TIME = time.strftime("%Y%m%d_%H%M%S")
 TEXT_LOG_NAME = f"triageboi_log_{CUR_TIME}.txt"
 JSON_LOG_NAME = f"triageboi_json_{CUR_TIME}.json"
 
-VERSION = "2.1.0"
+VERSION = "2.4.0"
 
 pe_mach_types: dict = {
     0x0: "UNKNOWN",
@@ -846,16 +912,37 @@ pe_mach_types: dict = {
 pe_common_sections: set = {
     ".text",
     ".bss",
-    ".rdata",
+    ".CRT",
     ".data",
-    ".pdata",
-    ".reloc",
     ".edata",
     ".idata",
-    ".tls",
+    ".pdata",
+    ".rdata",
+    ".xdata",
     ".debug",
-    ".rsrc",
     ".gfids",
+    ".reloc",
+    ".rsrc",
+    ".tls",
+}
+
+pe_directories: set = {
+    "DIRECTORY_ENTRY_EXPORT",           # Export Directory
+    "DIRECTORY_ENTRY_IMPORT",           # Import Directory
+    "DIRECTORY_ENTRY_RESOURCE",         # Resource Directory
+    "DIRECTORY_ENTRY_EXCEPTION",        # Exception Directory
+    "DIRECTORY_ENTRY_SECURITY",         # Security Directory
+    "DIRECTORY_ENTRY_BASERELOC",        # Base Relocation Directory
+    "DIRECTORY_ENTRY_DEBUG",            # Debug Directory
+    "DIRECTORY_ENTRY_ARCHITECTURE",     # Architecture Specific Data Directory
+    "DIRECTORY_ENTRY_COPYRIGHT",        # Copyright Directory
+    "DIRECTORY_ENTRY_GLOBALPTR",        # RVA of GlobalPtr Directory
+    "DIRECTORY_ENTRY_TLS",              # Thread Local Storage Directory
+    "DIRECTORY_ENTRY_LOAD_CONFIG",      # Load Configuration Directory
+    "DIRECTORY_ENTRY_BOUND_IMPORT",     # Bound Import Directory
+    "DIRECTORY_ENTRY_IAT",              # Import Address Table
+    "DIRECTORY_ENTRY_DELAY_IMPORT",     # Delay Load Import Directory
+    "DIRECTORY_ENTRY_COM_DESCRIPTOR",   # CLR Header/.NET Directory
 }
 
 pe_characteristics: dict = {
@@ -1025,15 +1112,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "-l",
         "--log",
-        action="store_true",
-        default=False,
+        nargs="?",
+        const=TEXT_LOG_NAME,
+        default=None,
         help="Generate text log",
     )
     parser.add_argument(
         "-j",
         "--json",
-        action="store_true",
-        default=False,
+        nargs="?",
+        const=JSON_LOG_NAME,
+        default=None,
         help="Generate JSON log",
     )
     parser.add_argument(
