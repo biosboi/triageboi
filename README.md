@@ -6,7 +6,7 @@ Triageboi is a reverse engineering tool designed to decrease initial triage time
 
 All files recieve a "Standard Information" block including name, size, hashes (MD5/SHA256), type, and any VirusTotal results if a VirusTotal API key is provided.
 
-Additinally, PE, ELF, and Mach-O binaries will receive an additional information block containing format specific details. Using the "-v" flag will increase verbosity, generating even more information such as displaying imports and extracting certificates from PE files.
+PE, ELF, and Mach-O binaries will receive an information block containing format specific details. Using the "-v" flag will increase verbosity, generating even more information such as displaying imports and extracting certificates from PE files.
 
 ### Motivation
 
